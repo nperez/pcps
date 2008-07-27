@@ -79,16 +79,19 @@ sub _default()
         return;
     }
 
-    while (my ($subscriber, $return) = each %{ $self->_get_subs() })
+    my $subs = $self->_get_subs();
+    
+    while (my ($subscriber, $return) = each %{ $subs })
     {
         if(!$self->_has_event($subscriber, $return))
         {
             Carp::carp("$subscriber no longer has $return in their events");
-            $self->_remove_sub($subscriber, $event);
+            $removed->{$subscriber} = $event;
         }
         
         $kernel->post($subscriber, $return, @$arg);
     }
+
 }
 
 sub listing()
@@ -283,7 +286,7 @@ sub _del_pub()
 sub _get_subs()
 {
     my ($self, $event) = @_;
-    return $self->[+EVENTS]->{$event}->[+SUBSCRIBERS];
+    return \%{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] };
 }
 
 1;
