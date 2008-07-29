@@ -2,9 +2,9 @@ package POE::Component::PubSub::Status;
 use warnings;
 use strict;
 
-use Exporter;
+use base 'Exporter';
 
-use constants
+use constant
 {
     'PCPS_NOT_PUBLISHED' => 0,
     'PCPS_NOT_OWNED' => 1,
@@ -15,7 +15,7 @@ use constants
 
 our $VERSION = '0.01';
 
-our @EXPORT_OK = 
+our @EXPORT = 
     qw/ 
         &PCPS_NOT_PUBLISHED
         &PCPS_NOT_OWNED
@@ -24,3 +24,4 @@ our @EXPORT_OK =
         &PCPS_EVENT_EXISTS
     /;
 
+1;

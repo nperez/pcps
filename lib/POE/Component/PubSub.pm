@@ -5,12 +5,14 @@ use strict;
 
 our $VERSION = '0.01';
 
+use POE::Component::PubSub::Status;
 use POE;
 use Carp;
 
 use constant
 {
 	'EVENTS'		=>	0,
+    'OPTIONS'       =>  1,
     'PUBLISHER'     =>  0,
     'SUBSCRIBERS'   =>  1,
 };
@@ -19,9 +21,11 @@ sub new()
 {
 	my $class = shift(@_);
 	my $self = [];
-	$self->[+EVENTS] = {};
 
 	bless($self, $class);
+	
+    $self->[+EVENTS] = {};
+    $self->_gather_options(\@_);
 
 	POE::Session->create
 	(
@@ -58,24 +62,29 @@ sub _stop()
 
 sub _default()
 {
-    my ($kernel, $self, $sender, $event, $arg) = 
+    my ($kernel, $self, $sender, $status, $event, $arg) = 
         @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
-
-    if(!$self->_is_published($event))
+    
+    if(!$self->_has_event($sender, $status))
+	{
+	    Carp::carp($sender . ' must own the ' . $status . ' status event');
+        return;
+	}
+    elsif(!$self->_is_published($event))
     {
-        Carp::carp('$event is not published');
+        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
         return;
     }
 
     if(!$self->_owns($sender->ID(), $event))
     {
-        Carp::carp('$event is not owned by $sender');
+        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
         return;
     }
 
     if(!$self->_has_subscribers($event))
     {
-        Carp::carp('$event currently has no subscribers');
+        $kernel->post($sender, $status, +PCPS_NO_SUBSCRIBERS);
         return;
     }
 
@@ -86,12 +95,11 @@ sub _default()
         if(!$self->_has_event($subscriber, $return))
         {
             Carp::carp("$subscriber no longer has $return in their events");
-            $removed->{$subscriber} = $event;
+            $self->_remove_sub($subscriber, $return);
         }
         
         $kernel->post($subscriber, $return, @$arg);
     }
-
 }
 
 sub listing()
@@ -104,17 +112,22 @@ sub listing()
 
 sub publish()
 {
-	my ($kernel, $self, $sender, $event) = 	@_[KERNEL, OBJECT, SENDER, ARG0];
-		
-	if(!defined($event))
+	my ($kernel, $self, $sender, $status, $event) 
+        = @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
+	
+    if(!$self->_has_event($sender, $status))
 	{
-		Carp::carp('$event argument is required for publishing');
+	    Carp::carp($sender . ' must own the ' . $status . ' status event');
         return;
 	}
-    
-    if($self->_is_published($event))
+	elsif(!defined($event))
+	{
+        $kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+        return;
+	}
+    elsif($self->_is_published($event))
     {
-        Carp::carp('$event already exists');
+        $kernel->post($sender, $status, +PCPS_EVENT_EXISTS);
         return;
     }
 
@@ -124,24 +137,27 @@ sub publish()
 
 sub subscribe()
 {
-	my ($kernel, $self, $sender, $event, $return) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
+	my ($kernel, $self, $sender, $status, $event, $return) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
 
-	if(!defined($event))
+	if(!$self->_has_event($sender, $status))
 	{
-		Carp::carp('$event argument is required for subscribing');
+	    Carp::carp($sender . ' must own the ' . $status . 'status event');
         return;
 	}
-
-    if(!$self->_is_published($event))
+	elsif(!defined($event))
+	{
+        $kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+        return;
+	}
+    elsif(!$self->_is_published($event))
     {
-        Carp::carp('$event must first be published');
+        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
         return;
     }
-	
-	if(!$self->_has_event($sender, $return))
+	elsif(!$self->_has_event($sender, $return))
 	{
-	    Carp::carp($sender . ' must own the ' . $event . ' event');
+        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
         return;
 	}
 
@@ -150,24 +166,27 @@ sub subscribe()
 
 sub recind()
 {
-    my ($kernel, $self, $sender, $event) = 
+    my ($kernel, $self, $sender, $status, $event) = 
         @_[KERNEL, OBJECT, SENDER, ARG0];
 
-    if(!defined($event))
+    if(!$self->_has_event($sender, $status))
 	{
-		Carp::carp('$event argument is required for recinding');
+	    Carp::carp($sender . ' must own the ' . $status . 'status event');
         return;
 	}
-
-    if(!$self->_is_published($event))
+	elsif(!defined($event))
+	{
+        $kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+        return;
+	}
+    elsif(!$self->_is_published($event))
     {
-        Carp::carp('$event is not published');
+        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
         return;
     }
-
-    if(!$self->_owns($sender->ID(), $event))
+    elsif(!$self->_owns($sender->ID(), $event))
     {
-        Carp::carp('$event is not owned by $sender');
+        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
         return;
     }
 
@@ -182,24 +201,27 @@ sub recind()
 
 sub cancel()
 {
-    my ($kernel, $self, $sender, $event) = 
+    my ($kernel, $self, $sender, $status, $event) = 
         @_[KERNEL, OBJECT, SENDER, ARG0];
     
-    if(!defined($event))
+    if(!$self->_has_event($sender, $status))
 	{
-		Carp::carp('$event argument is required for canceling');
+	    Carp::carp($sender . ' must own the ' . $status . 'status event');
+        return;
+	} 
+    elsif(!defined($event))
+	{
+		$kernel->post($sender, $status, +PCPS_INVALID_EVENT);
         return;
 	}
-    
-    if(!$self->_has_event($sender, $event))
+    elsif(!$self->_has_event($sender, $event))
     {
-        Carp::carp($sender . ' must own the ' . $event . ' event');
+        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
         return;
     }
-
-    if(!$self->_is_published($event))
+    elsif(!$self->_is_published($event))
     {
-        Carp::carp('$event is not published');
+        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
         return;
     }
 
@@ -287,6 +309,33 @@ sub _get_subs()
 {
     my ($self, $event) = @_;
     return \%{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] };
+}
+
+sub _gather_options()
+{
+	my ($self, $args) = @_;
+	
+	my $opts = {};
+
+	while(@$args != 0)
+	{
+		my $key = lc(shift(@{$args}));
+		my $value = shift(@{$args});
+		
+		if(ref($value) eq 'HASH')
+		{
+			my $hash = {};
+			foreach my $sub_key (keys %$value)
+			{
+				$hash->{lc($sub_key)} = $value->{$sub_key};
+			}
+			$opts->{$key} = $hash;
+			next;
+		}
+		$opts->{$key} = $value;
+	}
+
+    $self->[+OPTIONS] = $opts;;
 }
 
 1;
