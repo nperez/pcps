@@ -1,0 +1,23 @@
+---
+name: POE-Component-PubSub
+version: 0.01
+author:
+  - 'Nicholas R. Perez <nperez@cpan.org>'
+abstract: |-
+  A generic publish/subscribe POE::Component that 
+  enables POE::Sessions to publish events to which other POE::Sessions may 
+  subscribe.
+license: gpl
+resources:
+  license: http://opensource.org/licenses/gpl-license.php
+build_requires:
+  POE: 1.003
+  Test::More: 0
+provides:
+  POE::Component::PubSub:
+    file: lib/POE/Component/PubSub.pm
+    version: 0.01
+generated_by: Module::Build version 0.280801
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.2.html
+  version: 1.2

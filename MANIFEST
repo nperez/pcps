@@ -1,5 +1,5 @@
 Build.PL
-Changes
+ChangeLog
 MANIFEST
 META.yml # Will be created by "make dist"
 README
