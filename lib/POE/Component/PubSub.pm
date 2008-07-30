@@ -27,6 +27,8 @@ sub new()
     $self->[+EVENTS] = {};
     $self->_gather_options(\@_);
 
+    $self->[+OPTIONS]->{'alias'} ||= 'PubSub';
+
 	POE::Session->create
 	(
 		'object_states' =>
@@ -54,16 +56,23 @@ sub new()
 
 sub _start()
 {
+    my ($kernel, $object) = @_;
+
+    $kernel->alias_set($object->[+OPTIONS]->{'alias'});
+    return;
 }
 
 sub _stop()
 {
+    $kernel->alias_remove($object->[+OPTIONS]->{'alias'});
 }
 
 sub _default()
 {
-    my ($kernel, $self, $sender, $status, $event, $arg) = 
+    my ($kernel, $self, $sender, $event, $args) = 
         @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
+
+    my ($id, $status, @args) = @$args;
     
     if(!$self->_has_event($sender, $status))
 	{
@@ -72,19 +81,19 @@ sub _default()
 	}
     elsif(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
         return;
     }
 
     if(!$self->_owns($sender->ID(), $event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
         return;
     }
 
     if(!$self->_has_subscribers($event))
     {
-        $kernel->post($sender, $status, +PCPS_NO_SUBSCRIBERS);
+        $kernel->post($sender, $status, $id, +PCPS_NO_SUBSCRIBERS);
         return;
     }
 
@@ -100,11 +109,14 @@ sub _default()
         
         $kernel->post($subscriber, $return, @$arg);
     }
+
+    $kernel->post($sender, $status, $id, +PCPS_OK);
 }
 
 sub listing()
 {
-    my ($kernel, $self, $sender, $return) = @_[KERNEL, OBJECT, SENDER, ARG0];
+    my ($kernel, $self, $sender, $id, $return) 
+        = @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
 
     # XXX return listing if no $sender/$return;
     # else return results to $sender -> $return event;
@@ -112,8 +124,8 @@ sub listing()
 
 sub publish()
 {
-	my ($kernel, $self, $sender, $status, $event) 
-        = @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
+	my ($kernel, $self, $sender, $id, $status, $event) 
+        = @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
 	
     if(!$self->_has_event($sender, $status))
 	{
@@ -122,23 +134,24 @@ sub publish()
 	}
 	elsif(!defined($event))
 	{
-        $kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+        $kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
         return;
 	}
     elsif($self->_is_published($event))
     {
-        $kernel->post($sender, $status, +PCPS_EVENT_EXISTS);
+        $kernel->post($sender, $status, $id, +PCPS_EVENT_EXISTS);
         return;
     }
 
 	$self->_add_pub($sender->ID(), $event);
+    $kernel->post($sender, $status, $id, +PCPS_OK);
 	
 }
 
 sub subscribe()
 {
-	my ($kernel, $self, $sender, $status, $event, $return) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
+	my ($kernel, $self, $sender, $id, $status, $event, $return) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG3];
 
 	if(!$self->_has_event($sender, $status))
 	{
@@ -147,27 +160,28 @@ sub subscribe()
 	}
 	elsif(!defined($event))
 	{
-        $kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+        $kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
         return;
 	}
     elsif(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
         return;
     }
 	elsif(!$self->_has_event($sender, $return))
 	{
-        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
         return;
 	}
 
     $self->_add_sub($sender->ID, $event, $return);
+    $kernel->post($sender, $status, $id, +PCPS_OK);
 }
 
 sub recind()
 {
-    my ($kernel, $self, $sender, $status, $event) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0];
+    my ($kernel, $self, $sender, $id, $status, $event) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
 
     if(!$self->_has_event($sender, $status))
 	{
@@ -176,17 +190,17 @@ sub recind()
 	}
 	elsif(!defined($event))
 	{
-        $kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+        $kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
         return;
 	}
     elsif(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
         return;
     }
     elsif(!$self->_owns($sender->ID(), $event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
         return;
     }
 
@@ -196,13 +210,14 @@ sub recind()
     }
     
     $self->_remove_pub($sender->ID(), $event);
+    $kernel->post($sender, $status, $id, +PCPS_OK);
 
 }
 
 sub cancel()
 {
-    my ($kernel, $self, $sender, $status, $event) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0];
+    my ($kernel, $self, $sender, $id, $status, $event) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
     
     if(!$self->_has_event($sender, $status))
 	{
@@ -211,21 +226,22 @@ sub cancel()
 	} 
     elsif(!defined($event))
 	{
-		$kernel->post($sender, $status, +PCPS_INVALID_EVENT);
+		$kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
         return;
 	}
     elsif(!$self->_has_event($sender, $event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_OWNED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
         return;
     }
     elsif(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, +PCPS_NOT_PUBLISHED);
+        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
         return;
     }
 
     $self->_remove_sub($sender->ID(), $event);
+    $kernel->post($sender, $status, $id, +PCPS_OK);
 
 }
 
