@@ -15,5 +15,4 @@ my $builder = Module::Build->new(
     add_to_cleanup      => [ 'POE-Component-PubSub-*' ],
 );
 
-
 $builder->create_build_script();
