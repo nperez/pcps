@@ -1,101 +1,96 @@
-#!perl -T
+use feature ':5.10';
 use warnings;
 use strict;
 
-use Test::More tests => 10;
+use Test::More tests => 7;
 use POE;
 
-#start it off
 BEGIN
 {
     use_ok('POE::Component::PubSub');
-    use_ok('POE::Component::PubSub::Status');
 }
 
-#helper subs for instantiation
-sub test_new_pcps_fail
-{
-    my ($name, @args) = @_;
-    eval { POE::Component::PubSub->new(@args); };
-    ok( $@ ne '', $name );
-}
+my $comp = POE::Component::PubSub->new('pub_alias');
+isa_ok($comp, 'POE::Component::PubSub');
 
-sub test_new_pcps_succeed
-{
-    my ($name, @args) = @_;
-    eval { POE::Component::PubSub->new(@args); };
-    ok( $@ eq '', $name );
-}
-
-#make sure we have all of the constants we need
-can_ok
-(
-    'POE::Component::PubSub' 
-    qw/ 
-        PCPS_NOT_PUBLISHED
-        PCPS_NOT_OWNED
-        PCPS_NO_SUBSCRIBERS
-        PCPS_INVALID_EVENT
-        PCPS_EVENT_EXISTS
-    /
-);
-
-#start it up
-test_new_pcps_succeed('Instantiate with alias', 'ALIAS' => 'MyPubSub');
-
-#create a producer
 POE::Session->create
 (
     'inline_states' =>
     {
-        '_start' =>
-            sub
-            {
-                $_[KERNEL]->alias_set('producer');
-                $_[KERNEL]->yield('publish');
-            },
-        '_stop' =>
-            sub
-            {
-                $_[KERNEL]->alias_remove('producer');
-            },
-        'publish' =>
-            sub
-            {
-                $_[KERNEL]->post
-                (
-                    'MyPubSub', 
-                    'publish',
-                    1,
-                    'status',
-                    'new_message'
-                );
-            },
-        'status' =>
-            sub
-            {
-                if($_[ARG0] == 1 && $_[ARG1] == +PCPS_OK)
-                {
-                    pass('Published event');
-                }
-                if($_[ARG0] == 3 && $_[ARG1] == +PCPS_OK)
-                {
-                    pass('Event fired successfully');
-                }
-                
-            },
-        'fire_message' =>
-            sub
-            {
-                $_[KERNEL]->post
-                (
-                    'MyPubSub',
-                    'new_message',
-                    3,
-                    'status',
-                    'This is the message',
-                );
+        '_start' => sub
+        {
+            $_[KERNEL]->alias_set('runner');
+            $_[KERNEL]->yield('continue');
+        },
+        'continue' => sub
+        {
+            make_publisher();
+            make_subscriber();
 
-            },
+            $_[KERNEL]->post('test1', 'fire');
+        },
     }
 );
+
+POE::Kernel->run();
+
+exit 0;
+
+sub make_publisher()
+{
+    POE::Session->create
+    (
+        'inline_states' =>
+        {
+            '_start' => sub
+            {
+                $_[KERNEL]->alias_set('test1');
+                $_[KERNEL]->yield('publisher');
+            },
+            
+            'publisher' => sub
+            {
+                $_[KERNEL]->post('pub_alias', 'publish', 'foo');
+                pass('Published');
+            },
+
+            'fire' => sub
+            {
+                $_[KERNEL]->post('pub_alias', 'foo', 'ARGUMENT');
+                pass('Event fired');
+                $_[KERNEL]->alias_remove('test1');
+            }
+        }
+    );
+}
+
+sub make_subscriber()
+{
+    POE::Session->create
+    (
+        'inline_states' =>
+        {
+            '_start' => sub
+            {
+                $_[KERNEL]->alias_set('test2');
+                $_[KERNEL]->yield('subscriber');
+            },
+            
+            'subscriber' => sub
+            {
+                $_[KERNEL]->post('pub_alias', 'subscribe', 'foo', 'fired_event');
+                pass('Subscribed');
+            },
+
+            'fired_event' => sub
+            {
+                pass('Event received');
+
+                ok($_[ARG0] eq 'ARGUMENT', 'Argument passed successfully');
+
+                $_[KERNEL]->alias_remove('test2');
+            }
+        }
+    );
+}
+        

@@ -6,14 +6,13 @@ use strict;
 
 our $VERSION = '0.01';
 
-use POE::Component::PubSub::Status;
 use POE;
 use Carp;
 
 use constant
 {
 	'EVENTS'		=>	0,
-    'OPTIONS'       =>  1,
+    'ALIAS'         =>  1,
     'PUBLISHER'     =>  0,
     'SUBSCRIBERS'   =>  1,
 };
@@ -23,16 +22,12 @@ sub new()
 	my $class = shift(@_);
     my $alias = shift(@_);
 	my $self = [];
+	$self->[+EVENTS] = {};
     $alias //= 'PUBLISH_SUBSCRIBE';
 
     $self->[+ALIAS] = $alias;
 
 	bless($self, $class);
-	
-    $self->[+EVENTS] = {};
-    $self->_gather_options(\@_);
-
-    $self->[+OPTIONS]->{'alias'} ||= 'PubSub';
 
 	POE::Session->create
 	(
@@ -62,67 +57,52 @@ sub new()
 
 sub _start()
 {
-    my ($kernel, $object) = @_;
-
-    $kernel->alias_set($object->[+OPTIONS]->{'alias'});
-    return;
+    $_[KERNEL]->alias_set($_[OBJECT]->[+ALIAS]);
 }
 
 sub _stop()
 {
-    $kernel->alias_remove($object->[+OPTIONS]->{'alias'});
+    $_[KERNEL]->alias_remove($_[OBJECT]->[+ALIAS]);
 }
 
 sub _default()
 {
-    my ($kernel, $self, $sender, $event, $args) = 
+    my ($kernel, $self, $sender, $event, $arg) = 
         @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
 
-    my ($id, $status, @args) = @$args;
-    
-    if(!$self->_has_event($sender, $status))
-	{
-	    Carp::carp($sender . ' must own the ' . $status . ' status event');
-        return;
-	}
-    elsif(!$self->_is_published($event))
+    if(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
+        Carp::carp('$event is not published');
         return;
     }
 
     if(!$self->_owns($sender->ID(), $event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
+        Carp::carp('$event is not owned by $sender');
         return;
     }
 
     if(!$self->_has_subscribers($event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NO_SUBSCRIBERS);
+        Carp::carp('$event currently has no subscribers');
         return;
     }
 
-    my $subs = $self->_get_subs();
-    
-    while (my ($subscriber, $return) = each %{ $subs })
+    while (my ($subscriber, $return) = each %{ $self->_get_subs($event) })
     {
         if(!$self->_has_event($subscriber, $return))
         {
             Carp::carp("$subscriber no longer has $return in their events");
-            $self->_remove_sub($subscriber, $return);
+            $self->_remove_sub($subscriber, $event);
         }
         
         $kernel->post($subscriber, $return, @$arg);
     }
-
-    $kernel->post($sender, $status, $id, +PCPS_OK);
 }
 
 sub listing()
 {
-    my ($kernel, $self, $sender, $id, $return) 
-        = @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
+    my ($kernel, $self, $sender, $return) = @_[KERNEL, OBJECT, SENDER, ARG1];
 
     if(!defined($return))
 	{
@@ -143,83 +123,70 @@ sub listing()
 
 sub publish()
 {
-	my ($kernel, $self, $sender, $id, $status, $event) 
-        = @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
-	
-    if(!$self->_has_event($sender, $status))
+	my ($kernel, $self, $sender, $event) = 	@_[KERNEL, OBJECT, SENDER, ARG0];
+		
+	if(!defined($event))
 	{
-	    Carp::carp($sender . ' must own the ' . $status . ' status event');
+		Carp::carp('$event argument is required for publishing');
         return;
 	}
-	elsif(!defined($event))
-	{
-        $kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
-        return;
-	}
-    elsif($self->_is_published($event))
+    
+    if($self->_is_published($event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_EVENT_EXISTS);
+        Carp::carp('$event already exists');
         return;
     }
 
 	$self->_add_pub($sender->ID(), $event);
-    $kernel->post($sender, $status, $id, +PCPS_OK);
 	
 }
 
 sub subscribe()
 {
-	my ($kernel, $self, $sender, $id, $status, $event, $return) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG3];
+	my ($kernel, $self, $sender, $event, $return) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
 
-	if(!$self->_has_event($sender, $status))
+	if(!defined($event))
 	{
-	    Carp::carp($sender . ' must own the ' . $status . 'status event');
+		Carp::carp('$event argument is required for subscribing');
         return;
 	}
-	elsif(!defined($event))
-	{
-        $kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
-        return;
-	}
-    elsif(!$self->_is_published($event))
+
+    if(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
+        Carp::carp('$event must first be published');
         return;
     }
-	elsif(!$self->_has_event($sender, $return))
+	
+	if(!$self->_has_event($sender, $return))
 	{
-        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
+	    Carp::carp(($kernel->alias_list($sender))[0] . ' must own the ' . $return . ' event');
         return;
 	}
 
     $self->_add_sub($sender->ID, $event, $return);
-    $kernel->post($sender, $status, $id, +PCPS_OK);
 }
 
 sub recind()
 {
-    my ($kernel, $self, $sender, $id, $status, $event) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
+    my ($kernel, $self, $sender, $event) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0];
 
-    if(!$self->_has_event($sender, $status))
+    if(!defined($event))
 	{
-	    Carp::carp($sender . ' must own the ' . $status . 'status event');
+		Carp::carp('$event argument is required for recinding');
         return;
 	}
-	elsif(!defined($event))
-	{
-        $kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
-        return;
-	}
-    elsif(!$self->_is_published($event))
+
+    if(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
+        Carp::carp('$event is not published');
         return;
     }
-    elsif(!$self->_owns($sender->ID(), $event))
+
+    if(!$self->_owns($sender->ID(), $event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
+        Carp::carp('$event is not owned by $sender');
         return;
     }
 
@@ -229,38 +196,33 @@ sub recind()
     }
     
     $self->_remove_pub($sender->ID(), $event);
-    $kernel->post($sender, $status, $id, +PCPS_OK);
 
 }
 
 sub cancel()
 {
-    my ($kernel, $self, $sender, $id, $status, $event) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
+    my ($kernel, $self, $sender, $event) = 
+        @_[KERNEL, OBJECT, SENDER, ARG0];
     
-    if(!$self->_has_event($sender, $status))
+    if(!defined($event))
 	{
-	    Carp::carp($sender . ' must own the ' . $status . 'status event');
-        return;
-	} 
-    elsif(!defined($event))
-	{
-		$kernel->post($sender, $status, $id, +PCPS_INVALID_EVENT);
+		Carp::carp('$event argument is required for canceling');
         return;
 	}
-    elsif(!$self->_has_event($sender, $event))
+    
+    if(!$self->_is_subscribed($sender->ID(), $event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_OWNED);
+        Carp::carp($sender . ' must be subscribed to the ' . $event . ' event');
         return;
     }
-    elsif(!$self->_is_published($event))
+
+    if(!$self->_is_published($event))
     {
-        $kernel->post($sender, $status, $id, +PCPS_NOT_PUBLISHED);
+        Carp::carp('$event is not published');
         return;
     }
 
     $self->_remove_sub($sender->ID(), $event);
-    $kernel->post($sender, $status, $id, +PCPS_OK);
 
 }
 
@@ -368,34 +330,13 @@ sub _del_pub()
 sub _get_subs()
 {
     my ($self, $event) = @_;
-    return \%{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] };
+    return $self->[+EVENTS]->{$event}->[+SUBSCRIBERS];
 }
 
-sub _gather_options()
+sub _all_published_events()
 {
-	my ($self, $args) = @_;
-	
-	my $opts = {};
-
-	while(@$args != 0)
-	{
-		my $key = lc(shift(@{$args}));
-		my $value = shift(@{$args});
-		
-		if(ref($value) eq 'HASH')
-		{
-			my $hash = {};
-			foreach my $sub_key (keys %$value)
-			{
-				$hash->{lc($sub_key)} = $value->{$sub_key};
-			}
-			$opts->{$key} = $hash;
-			next;
-		}
-		$opts->{$key} = $value;
-	}
-
-    $self->[+OPTIONS] = $opts;;
+    my ($self) = @_;
+    return [ sort keys %{ $self->[+EVENTS] } ];
 }
 
 1;
