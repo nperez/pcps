@@ -1,5 +1,6 @@
 package POE::Component::PubSub;
 
+use feature ':5.10';
 use warnings;
 use strict;
 
@@ -20,7 +21,11 @@ use constant
 sub new()
 {
 	my $class = shift(@_);
+    my $alias = shift(@_);
 	my $self = [];
+    $alias //= 'PUBLISH_SUBSCRIBE';
+
+    $self->[+ALIAS] = $alias;
 
 	bless($self, $class);
 	
@@ -51,7 +56,8 @@ sub new()
 			'debug'	=>	1,
 		}
 	);
-
+    
+    return $self;
 }
 
 sub _start()
@@ -118,8 +124,21 @@ sub listing()
     my ($kernel, $self, $sender, $id, $return) 
         = @_[KERNEL, OBJECT, SENDER, ARG0 .. ARG2];
 
-    # XXX return listing if no $sender/$return;
-    # else return results to $sender -> $return event;
+    if(!defined($return))
+	{
+		Carp::carp('$event argument is required for listing');
+        return;
+	}
+    
+    if(!$self->_has_event($sender, $return))
+	{
+	    Carp::carp($sender . ' must own the ' . $return . ' event');
+        return;
+	}
+
+    my $events = $self->_all_published_events();
+
+    $kernel->post($sender, $return, $events);
 }
 
 sub publish()
@@ -251,11 +270,13 @@ sub cancel()
 # I needed to implement this.
 sub _events()
 {
+    $DB::single = 1;
+
 	my ($self, $session) = @_;
 	
-	if(ref($session) =~ m/POE::SESSION/)
+	if(uc(ref($session)) =~ m/POE::SESSION/)
 	{
-		return \@{ keys( %{ $session->[ &POE::Session::SE_STATES() ] } ) };
+		return [ keys( %{ $session->[ &POE::Session::SE_STATES() ] } ) ] ;
 	
 	} else {
 		
@@ -263,7 +284,7 @@ sub _events()
 
 		if(defined($ref))
 		{
-			return \@{ keys( %{ $ref->[ &POE::Session::SE_STATES() ] } ) };
+			return [ keys( %{ $ref->[ &POE::Session::SE_STATES() ] } ) ];
 		
 		} else {
 
@@ -275,14 +296,37 @@ sub _events()
 sub _has_event()
 {
 	my ($self, $session, $event) = @_;
+    
+    my $events = $self->_events( $session );
 
-	return scalar( grep( m/$event/, @{ $self->_events( $session ) } ) );
+    $DB::single = 1;
+    
+    if(defined($events))
+    {
+	    return scalar( grep( m/$event/, @{ $events } ) );
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+sub _has_subscribers()
+{
+    my ($self, $event) = @_;
+    return scalar( keys %{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] } ) ;
 }
 
 sub _is_published()
 {
     my ($self, $event) = @_;
     return exists($self->[+EVENTS]->{$event});
+}
+
+sub _is_subscribed()
+{
+    my ($self, $subscriber, $event) = @_;
+    return exists($self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber});
 }
 
 sub _owns()
@@ -371,6 +415,96 @@ subscribe.
 Version 0.01
 
 =head1 SYNOPSIS
+
+# Instantiate the publish/subscriber with the alias "pub"
+POE::Component::PubSub->new('pub');
+
+# Publish an event called "FOO"
+$_[KERNEL]->post('pub', 'publish', 'FOO');
+
+# Elsewhere, subscribe to that event, giving it an event to call
+# when the published event is fired.
+$_[KERNEL]->post('pub', 'subscribe', 'FOO', 'FireThisEvent');
+
+# Fire off the published event
+$_[KERNEL]->post('pub', 'FOO');
+
+=head1 EVENTS
+
+All public events do some sanity checking to make sure of a couple of things
+before allowing the events such as checking to make sure the posting session
+actually owns the event it is publishing, or that the event passed as the
+return event during subscription is owned by the sender. When one of those 
+cases comes up, an error is carp'd, and the event returns without stopping
+execution.
+
+=over 4
+
+=item 'publish'
+
+This is the event to use to publish events. It accepts one argument, the event
+to publish. The sender of the publish event must own the published event and
+the published event may not already be previously published.
+
+=item 'subscribe'
+
+This is the event to use when subscribing to published events. It accepts two
+arguments: 1) the published event, and 2) the event name of the subscriber to
+be called when the published event is fired. The event must be published prior
+to subscription and the sender must own the return event.
+
+=item 'recind'
+
+Use this event to stop publication of an event. It accepts one argument, the 
+published event. The event must be published, and published by the sender of
+the recind event. If the published event has any subscribers, a warning will
+be carp'd but execution will continue.
+
+=item 'cancel'
+
+Cancel subscriptions to events with this event. It accepts one argment, the
+published event. The event must be published and the sender must be subscribed
+to the event.
+
+=item '_default'
+
+After an event is published, the publisher may arbitrarily fire that event to
+this component and the subscribers will be notified by calling their respective
+return events with whatever arguments are passed by the publisher. The event 
+must be published, owned by the publisher, and have subscribers for the event
+to be propagated. If any of the subscribers no longer has a valid return event
+their subscriptions will be cancelled and a warning will be carp'd.
+
+=item 'listing'
+
+To receive an array reference containing the events that are currently
+published within the component, call this event. It accepts one argument, the 
+return event to fire with the listing. The sender must own the return event. 
+
+=back
+
+=head1 CLASS METHODS
+
+=over 4
+
+=item POE::Component::PubSub->new($alias)
+
+This is the constructor for the publish subscribe component. It instantiates
+it's own session using the provided $alias argument to set its kernel alias. 
+If no alias is provided, the default alias is 'PUBLISH_SUBSCRIBE'.
+
+=back
+
+=head1 NOTES
+
+Right now this component is extremely simple, but thorough when it comes to 
+checking the various requirements for publishing and subscribing. Currently, 
+there is no mechanism to place meta-subscriptions to the events of the 
+component itself. This feature is planned for the next release.
+
+Also, to do some of the checking on whether subscribers own the return events,
+some ideas were lifted from POE::API::Peek, and like that module, if there are
+changes to the POE core, they may break this module. 
 
 =head1 AUTHOR
 

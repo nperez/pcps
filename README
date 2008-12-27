@@ -1,48 +1,126 @@
-POE-Component-PubSub
+NAME
+    POE::Component::PubSub - A generic publish/subscribe POE::Component that
+    enables POE::Sessions to publish events to which other POE::Sessions may
+    subscribe.
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+VERSION
+    Version 0.01
 
-A README file is required for CPAN modules since CPAN extracts the README
-file from a module distribution so that people browsing the archive
-can use it get an idea of the modules uses. It is usually a good idea
-to provide version information here so that people can decide whether
-fixes for the module are worth downloading.
+SYNOPSIS
+    # Instantiate the publish/subscriber with the alias "pub"
+    POE::Component::PubSub->new('pub');
 
-INSTALLATION
+    # Publish an event called "FOO" $_[KERNEL]->post('pub', 'publish',
+    'FOO');
 
-To install this module, run the following commands:
+    # Elsewhere, subscribe to that event, giving it an event to call # when
+    the published event is fired. $_[KERNEL]->post('pub', 'subscribe',
+    'FOO', 'FireThisEvent');
 
-    perl Build.PL
-    ./Build
-    ./Build test
-    ./Build install
+    # Fire off the published event $_[KERNEL]->post('pub', 'FOO');
 
+EVENTS
+    All public events do some sanity checking to make sure of a couple of
+    things before allowing the events such as checking to make sure the
+    posting session actually owns the event it is publishing, or that the
+    event passed as the return event during subscription is owned by the
+    sender. When one of those cases comes up, an error is carp'd, and the
+    event returns without stopping execution.
 
-SUPPORT AND DOCUMENTATION
+    'publish'
+        This is the event to use to publish events. It accepts one argument,
+        the event to publish. The sender of the publish event must own the
+        published event and the published event may not already be
+        previously published.
 
-After installing, you can find documentation for this module with the perldoc command.
+    'subscribe'
+        This is the event to use when subscribing to published events. It
+        accepts two arguments: 1) the published event, and 2) the event name
+        of the subscriber to be called when the published event is fired.
+        The event must be published prior to subscription and the sender
+        must own the return event.
 
-    perldoc POE::Component::PubSub
+    'recind'
+        Use this event to stop publication of an event. It accepts one
+        argument, the published event. The event must be published, and
+        published by the sender of the recind event. If the published event
+        has any subscribers, a warning will be carp'd but execution will
+        continue.
 
-You can also look for information at:
+    'cancel'
+        Cancel subscriptions to events with this event. It accepts one
+        argment, the published event. The event must be published and the
+        sender must be subscribed to the event.
 
-    Search CPAN
-        http://search.cpan.org/dist/POE-Component-PubSub
+    '_default'
+        After an event is published, the publisher may arbitrarily fire that
+        event to this component and the subscribers will be notified by
+        calling their respective return events with whatever arguments are
+        passed by the publisher. The event must be published, owned by the
+        publisher, and have subscribers for the event to be propagated. If
+        any of the subscribers no longer has a valid return event their
+        subscriptions will be cancelled and a warning will be carp'd.
 
-    CPAN Request Tracker:
-        http://rt.cpan.org/NoAuth/Bugs.html?Dist=POE-Component-PubSub
+    'listing'
+        To receive an array reference containing the events that are
+        currently published within the component, call this event. It
+        accepts one argument, the return event to fire with the listing. The
+        sender must own the return event.
 
-    AnnoCPAN, annotated CPAN documentation:
-        http://annocpan.org/dist/POE-Component-PubSub
+CLASS METHODS
+    POE::Component::PubSub->new($alias)
+        This is the constructor for the publish subscribe component. It
+        instantiates it's own session using the provided $alias argument to
+        set its kernel alias. If no alias is provided, the default alias is
+        'PUBLISH_SUBSCRIBE'.
 
-    CPAN Ratings:
-        http://cpanratings.perl.org/d/POE-Component-PubSub
+NOTES
+    Right now this component is extremely simple, but thorough when it comes
+    to checking the various requirements for publishing and subscribing.
+    Currently, there is no mechanism to place meta-subscriptions to the
+    events of the component itself. This feature is planned for the next
+    release.
 
-COPYRIGHT AND LICENCE
+    Also, to do some of the checking on whether subscribers own the return
+    events, some ideas were lifted from POE::API::Peek, and like that
+    module, if there are changes to the POE core, they may break this
+    module.
 
-Copyright (C) 2007 Nicholas R. Perez
+AUTHOR
+    Nicholas R. Perez, "<nperez at cpan.org>"
 
-This program is released under the following license: gpl
+BUGS
+    Please report any bugs or feature requests to "bug-poe-component-pubsub
+    at rt.cpan.org", or through the web interface at
+    <http://rt.cpan.org/NoAuth/ReportBug.html?Queue=POE-Component-PubSub>. I
+    will be notified, and then you'll automatically be notified of progress
+    on your bug as I make changes.
+
+SUPPORT
+    You can find documentation for this module with the perldoc command.
+
+        perldoc POE::Component::PubSub
+
+    You can also look for information at:
+
+    *   AnnoCPAN: Annotated CPAN documentation
+
+        <http://annocpan.org/dist/POE-Component-PubSub>
+
+    *   CPAN Ratings
+
+        <http://cpanratings.perl.org/d/POE-Component-PubSub>
+
+    *   RT: CPAN's request tracker
+
+        <http://rt.cpan.org/NoAuth/Bugs.html?Dist=POE-Component-PubSub>
+
+    *   Search CPAN
+
+        <http://search.cpan.org/dist/POE-Component-PubSub>
+
+COPYRIGHT & LICENSE
+    Copyright 2008 Nicholas R. Perez, all rights reserved.
+
+    This program is released under the following license: gpl
+
