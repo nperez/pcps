@@ -9,6 +9,7 @@ my $builder = Module::Build->new(
     dist_version_from   => 'lib/POE/Component/PubSub.pm',
     create_readme       => 1,
     build_requires => {
+        'perl'  => '5.10.0',
         'Test::More' => 0,
         'POE' => 1.003
     },

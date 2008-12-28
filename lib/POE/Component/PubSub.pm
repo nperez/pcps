@@ -1,10 +1,10 @@
 package POE::Component::PubSub;
 
-use feature ':5.10';
+use 5.010;
 use warnings;
 use strict;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 use POE;
 use Carp;
