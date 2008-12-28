@@ -1,3 +1,8 @@
 2008-12-27 nperez <nperez@cpan.org>
+	* Maintenance revision: 0.02
+	* Make sure Build.PL requires 5.10.0
+	* Make sure PubSub.pm does a backwards compat 'use 5.010;'
+
+2008-12-27 nperez <nperez@cpan.org>
 	* Initial release
 
