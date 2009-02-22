@@ -2,12 +2,13 @@ use feature ':5.10';
 use warnings;
 use strict;
 
-use Test::More tests => 7;
+use Test::More tests => 10;
 use POE;
 
 BEGIN
 {
     use_ok('POE::Component::PubSub');
+    use_ok('POE::Component::PubSub::Types');
 }
 
 my $comp = POE::Component::PubSub->new('pub_alias');
@@ -51,6 +52,7 @@ sub make_publisher()
             'publisher' => sub
             {
                 $_[KERNEL]->post('pub_alias', 'publish', 'foo');
+                $_[KERNEL]->post('pub_alias', 'publish', 'bar', +PUBLISH_INPUT, 'input');
                 pass('Published');
             },
 
@@ -58,8 +60,23 @@ sub make_publisher()
             {
                 $_[KERNEL]->post('pub_alias', 'foo', 'ARGUMENT');
                 pass('Event fired');
-                $_[KERNEL]->alias_remove('test1');
-            }
+            },
+
+            'input' => sub
+            {
+                pass('input event fired');
+
+                if(defined($_[ARG0]))
+                {
+                    if($_[ARG0] == 1)
+                    {
+                        pass('input argument okay');
+                        $_[KERNEL]->alias_remove('test1');
+                        return;
+                    }
+                }
+                fail('input argument not okay');
+            },
         }
     );
 }
@@ -87,7 +104,8 @@ sub make_subscriber()
                 pass('Event received');
 
                 ok($_[ARG0] eq 'ARGUMENT', 'Argument passed successfully');
-
+                
+                $_[KERNEL]->post('pub_alias', 'bar', 1);
                 $_[KERNEL]->alias_remove('test2');
             }
         }

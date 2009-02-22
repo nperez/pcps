@@ -9,12 +9,16 @@ our $VERSION = '0.02';
 use POE;
 use Carp;
 
+use POE::Component::PubSub::Types;
+
 use constant
 {
 	'EVENTS'		=>	0,
     'ALIAS'         =>  1,
     'PUBLISHER'     =>  0,
     'SUBSCRIBERS'   =>  1,
+    'TYPE'          =>  2,
+    'INPUT'         =>  3,
 };
 
 sub new()
@@ -76,28 +80,39 @@ sub _default()
         return;
     }
 
-    if(!$self->_owns($sender->ID(), $event))
+    if($self->_is_output($event))
     {
-        Carp::carp('$event is not owned by $sender');
-        return;
-    }
-
-    if(!$self->_has_subscribers($event))
-    {
-        Carp::carp('$event currently has no subscribers');
-        return;
-    }
-
-    while (my ($subscriber, $return) = each %{ $self->_get_subs($event) })
-    {
-        if(!$self->_has_event($subscriber, $return))
+        if(!$self->_owns($sender->ID(), $event))
         {
-            Carp::carp("$subscriber no longer has $return in their events");
-            $self->_remove_sub($subscriber, $event);
+            Carp::carp('$event is not owned by $sender');
+            return;
         }
-        
-        $kernel->post($subscriber, $return, @$arg);
+
+        if(!$self->_has_subscribers($event))
+        {
+            Carp::carp('$event currently has no subscribers');
+            return;
+        }
+
+        while (my ($subscriber, $return) = each %{ $self->_get_subs($event) })
+        {
+            if(!$self->_has_event($subscriber, $return))
+            {
+                Carp::carp("$subscriber no longer has $return in their events");
+                $self->_remove_sub($subscriber, $event);
+            }
+            
+            $kernel->post($subscriber, $return, @$arg);
+        }
     }
+    else
+    {
+        $kernel->post(
+            $self->_get_pub($event), 
+            $self->_get_input($event), 
+            @$arg);
+    }
+
 }
 
 sub listing()
@@ -123,7 +138,8 @@ sub listing()
 
 sub publish()
 {
-	my ($kernel, $self, $sender, $event) = 	@_[KERNEL, OBJECT, SENDER, ARG0];
+	my ($kernel, $self, $sender, $event, $type, $input) =
+        @_[KERNEL, OBJECT, SENDER, ARG0, ARG1, ARG2];
 		
 	if(!defined($event))
 	{
@@ -136,8 +152,14 @@ sub publish()
         Carp::carp('$event already exists');
         return;
     }
+    
+    if(!$self->_has_event($sender, $input))
+	{
+	    Carp::carp($sender . ' must own the ' . $input . ' event');
+        return;
+	}
 
-	$self->_add_pub($sender->ID(), $event);
+	$self->_add_pub($sender->ID(), $event, $type, $input);
 	
 }
 
@@ -152,12 +174,12 @@ sub subscribe()
         return;
 	}
 
-    if(!$self->_is_published($event))
+    if(!$self->_is_output($event))
     {
-        Carp::carp('$event must first be published');
+        Carp::carp('$event is not an output event');
         return;
     }
-	
+
 	if(!$self->_has_event($sender, $return))
 	{
 	    Carp::carp(($kernel->alias_list($sender))[0] . ' must own the ' . $return . ' event');
@@ -216,12 +238,6 @@ sub cancel()
         return;
     }
 
-    if(!$self->_is_published($event))
-    {
-        Carp::carp('$event is not published');
-        return;
-    }
-
     $self->_remove_sub($sender->ID(), $event);
 
 }
@@ -273,6 +289,18 @@ sub _has_event()
     }
 }
 
+sub _is_output()
+{
+    my ($self, $event) = @_;
+    
+    if(defined($self->[+EVENTS]->{$event}->[+TYPE]))
+    {
+        return $self->[+EVENTS]->{$event}->[+TYPE] == +PUBLISH_OUTPUT;
+    }
+
+    return 1;
+}
+
 sub _has_subscribers()
 {
     my ($self, $event) = @_;
@@ -299,10 +327,11 @@ sub _owns()
 
 sub _add_pub()
 {
-    my ($self, $publisher, $event) = @_;
+    my ($self, $publisher, $event, $type, $input) = @_;
     $self->[+EVENTS]->{$event} = [];
     $self->[+EVENTS]->{$event}->[+PUBLISHER] = $publisher;
-    $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] = {};
+    $self->[+EVENTS]->{$event}->[+TYPE] = $type;
+    $self->[+EVENTS]->{$event}->[+INPUT] = $input;
     return;
 }
 
@@ -331,6 +360,18 @@ sub _get_subs()
 {
     my ($self, $event) = @_;
     return $self->[+EVENTS]->{$event}->[+SUBSCRIBERS];
+}
+
+sub _get_pub()
+{
+    my ($self, $event) = @_;
+    return $self->[+EVENTS]->{$event}->[+PUBLISHER];
+}
+
+sub _get_input()
+{
+    my ($self, $event) = @_;
+    return $self->[+EVENTS]->{$event}->[+INPUT];
 }
 
 sub _all_published_events()
