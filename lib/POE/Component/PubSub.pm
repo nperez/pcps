@@ -384,15 +384,16 @@ execution.
 =item 'publish'
 
 This is the event to use to publish events. It accepts one argument, the event
-to publish. The sender of the publish event must own the published event and
-the published event may not already be previously published.
+to publish. The published event may not already be previously published. The
+event may be completely arbitrary and does not require the publisher to
+implement that event. Think of it as a name for a mailing list.
 
 =item 'subscribe'
 
 This is the event to use when subscribing to published events. It accepts two
 arguments: 1) the published event, and 2) the event name of the subscriber to
 be called when the published event is fired. The event must be published prior
-to subscription and the sender must own the return event.
+to subscription and the sender must own and implement the return event.
 
 =item 'recind'
 
