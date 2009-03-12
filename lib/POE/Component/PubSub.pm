@@ -3,23 +3,26 @@ package POE::Component::PubSub;
 use 5.010;
 use warnings;
 use strict;
+use base('Exporter');
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use POE;
 use Carp;
 
-use POE::Component::PubSub::Types;
-
 use constant
 {
-	'EVENTS'		=>	0,
-    'ALIAS'         =>  1,
-    'PUBLISHER'     =>  0,
-    'SUBSCRIBERS'   =>  1,
-    'TYPE'          =>  2,
-    'INPUT'         =>  3,
+	'EVENTS'		    => 0,
+    'ALIAS'             => 1,
+    'PUBLISHER'         => 0,
+    'SUBSCRIBERS'       => 1,
+    'TYPE'              => 2,
+    'INPUT'             => 3,
+    'PUBLISH_INPUT'     => 0,
+    'PUBLISH_OUTPUT'    => 1,
 };
+
+our @EXPORT = qw/ PUBLISH_INPUT PUBLISH_OUTPUT /;
 
 sub new()
 {
@@ -44,7 +47,7 @@ sub new()
 				'_default',
 				'publish',
 				'subscribe',
-				'recind',
+				'rescind',
                 'cancel',
 			]
 		],
@@ -153,11 +156,14 @@ sub publish()
         return;
     }
     
-    if(!$self->_has_event($sender, $input))
-	{
-	    Carp::carp($sender . ' must own the ' . $input . ' event');
-        return;
-	}
+    if(defined($type) && $type == +PUBLISH_INPUT)
+    {
+        if(!$self->_has_event($sender, $input))
+        {
+            Carp::carp($sender . ' must own the ' . defined($input) ? $input : '' . ' event');
+            return;
+        }
+    }
 
 	$self->_add_pub($sender->ID(), $event, $type, $input);
 	
@@ -182,21 +188,21 @@ sub subscribe()
 
 	if(!$self->_has_event($sender, $return))
 	{
-	    Carp::carp(($kernel->alias_list($sender))[0] . ' must own the ' . $return . ' event');
+	    Carp::carp($sender . ' must own the ' . $return . ' event');
         return;
 	}
 
     $self->_add_sub($sender->ID, $event, $return);
 }
 
-sub recind()
+sub rescind()
 {
     my ($kernel, $self, $sender, $event) = 
         @_[KERNEL, OBJECT, SENDER, ARG0];
 
     if(!defined($event))
 	{
-		Carp::carp('$event argument is required for recinding');
+		Carp::carp('$event argument is required for rescinding');
         return;
 	}
 
@@ -274,7 +280,8 @@ sub _events()
 sub _has_event()
 {
 	my ($self, $session, $event) = @_;
-    
+
+    return 0 if not defined($event);
     my $events = $self->_events( $session );
 
     $DB::single = 1;
@@ -293,6 +300,9 @@ sub _is_output()
 {
     my ($self, $event) = @_;
     
+    return 0 if not defined($event);
+    return 0 if not exists($self->[+EVENTS]->{$event});
+    
     if(defined($self->[+EVENTS]->{$event}->[+TYPE]))
     {
         return $self->[+EVENTS]->{$event}->[+TYPE] == +PUBLISH_OUTPUT;
@@ -304,24 +314,33 @@ sub _is_output()
 sub _has_subscribers()
 {
     my ($self, $event) = @_;
+    return 0 if not defined($event);
+    return 0 if not exists($self->[+EVENTS]->{$event});
     return scalar( keys %{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] } ) ;
 }
 
 sub _is_published()
 {
     my ($self, $event) = @_;
+    return 0 if not defined($event);
     return exists($self->[+EVENTS]->{$event});
 }
 
 sub _is_subscribed()
 {
     my ($self, $subscriber, $event) = @_;
+    return 0 if not defined($event);
+    return 0 if not defined($subscriber);
+    return 0 if not exists($self->[+EVENTS]->{$event});
     return exists($self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber});
 }
 
 sub _owns()
 {
     my ($self, $publisher, $event) = @_;
+    return 0 if not defined($event);
+    return 0 if not defined($publisher);
+    return 0 if not exists($self->[+EVENTS]->{$event});
     return $self->[+EVENTS]->{$event}->[+PUBLISHER] eq $publisher;
 }
 
@@ -377,7 +396,7 @@ sub _get_input()
 sub _all_published_events()
 {
     my ($self) = @_;
-    return [ sort keys %{ $self->[+EVENTS] } ];
+    return [ map { [$_, $self->[+EVENTS]->{$_}->[+INPUT]] } sort keys %{$self->[+EVENTS]} ];
 }
 
 1;
@@ -394,15 +413,15 @@ subscribe.
 
 =head1 VERSION
 
-Version 0.01
+Version 0.03
 
 =head1 SYNOPSIS
 
 # Instantiate the publish/subscriber with the alias "pub"
 POE::Component::PubSub->new('pub');
 
-# Publish an event called "FOO"
-$_[KERNEL]->post('pub', 'publish', 'FOO');
+# Publish an event called "FOO". +PUBLISH_OUTPUT is actually optional.
+$_[KERNEL]->post('pub', 'publish', 'FOO', +PUBLISH_OUTPUT);
 
 # Elsewhere, subscribe to that event, giving it an event to call
 # when the published event is fired.
@@ -410,6 +429,9 @@ $_[KERNEL]->post('pub', 'subscribe', 'FOO', 'FireThisEvent');
 
 # Fire off the published event
 $_[KERNEL]->post('pub', 'FOO');
+
+# Publish an 'input' event
+$_[KERNEL]->post('pub', 'publish', 'BAR', +PUBLISH_INPUT, 'MyInputEvent');
 
 =head1 EVENTS
 
@@ -429,18 +451,26 @@ to publish. The published event may not already be previously published. The
 event may be completely arbitrary and does not require the publisher to
 implement that event. Think of it as a name for a mailing list.
 
+You can also publish an 'input' or inverse event. This allows for arbitrary
+sessions to post to your event. In this case, you must supply the optional
+published event type and the event to be called when the published event fires. 
+
+There are two types: PUBLISH_INPUT and PUBLISH_OUTPUT. PUBLISH_OUPUT is implied
+when no argument is supplied.
+
 =item 'subscribe'
 
 This is the event to use when subscribing to published events. It accepts two
 arguments: 1) the published event, and 2) the event name of the subscriber to
-be called when the published event is fired. The event must be published prior
-to subscription and the sender must own and implement the return event.
+be called when the published event is fired. The event doesn't need to be  
+published prior to subscription to resolve chicken and egg problems in an async
+environment. But, the sender must own and implement the return event.
 
-=item 'recind'
+=item 'rescind'
 
 Use this event to stop publication of an event. It accepts one argument, the 
 published event. The event must be published, and published by the sender of
-the recind event. If the published event has any subscribers, a warning will
+the rescind event. If the published event has any subscribers, a warning will
 be carp'd but execution will continue.
 
 =item 'cancel'
@@ -460,9 +490,10 @@ their subscriptions will be cancelled and a warning will be carp'd.
 
 =item 'listing'
 
-To receive an array reference containing the events that are currently
-published within the component, call this event. It accepts one argument, the 
-return event to fire with the listing. The sender must own the return event. 
+To receive an array reference containing tuples of the event name, and the type
+of the events that are currently published within the component, call this 
+event. It accepts one argument, the return event to fire with the listing. The 
+sender must own the return event. 
 
 =back
 
@@ -531,7 +562,7 @@ L<http://search.cpan.org/dist/POE-Component-PubSub>
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2008 Nicholas R. Perez, all rights reserved.
+Copyright 2008-2009 Nicholas R. Perez, all rights reserved.
 
 This program is released under the following license: gpl
 

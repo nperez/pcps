@@ -4,20 +4,23 @@ NAME
     subscribe.
 
 VERSION
-    Version 0.01
+    Version 0.03
 
 SYNOPSIS
     # Instantiate the publish/subscriber with the alias "pub"
     POE::Component::PubSub->new('pub');
 
-    # Publish an event called "FOO" $_[KERNEL]->post('pub', 'publish',
-    'FOO');
+    # Publish an event called "FOO". +PUBLISH_OUTPUT is actually optional.
+    $_[KERNEL]->post('pub', 'publish', 'FOO', +PUBLISH_OUTPUT);
 
     # Elsewhere, subscribe to that event, giving it an event to call # when
     the published event is fired. $_[KERNEL]->post('pub', 'subscribe',
     'FOO', 'FireThisEvent');
 
     # Fire off the published event $_[KERNEL]->post('pub', 'FOO');
+
+    # Publish an 'input' event $_[KERNEL]->post('pub', 'publish', 'BAR',
+    +PUBLISH_INPUT, 'MyInputEvent');
 
 EVENTS
     All public events do some sanity checking to make sure of a couple of
@@ -29,21 +32,31 @@ EVENTS
 
     'publish'
         This is the event to use to publish events. It accepts one argument,
-        the event to publish. The sender of the publish event must own the
-        published event and the published event may not already be
-        previously published.
+        the event to publish. The published event may not already be
+        previously published. The event may be completely arbitrary and does
+        not require the publisher to implement that event. Think of it as a
+        name for a mailing list.
+
+        You can also publish an 'input' or inverse event. This allows for
+        arbitrary sessions to post to your event. In this case, you must
+        supply the optional published event type and the event to be called
+        when the published event fires.
+
+        There are two types: PUBLISH_INPUT and PUBLISH_OUTPUT. PUBLISH_OUPUT
+        is implied when no argument is supplied.
 
     'subscribe'
         This is the event to use when subscribing to published events. It
         accepts two arguments: 1) the published event, and 2) the event name
         of the subscriber to be called when the published event is fired.
-        The event must be published prior to subscription and the sender
-        must own the return event.
+        The event doesn't need to be published prior to subscription to
+        resolve chicken and egg problems in an async environment. But, the
+        sender must own and implement the return event.
 
-    'recind'
+    'rescind'
         Use this event to stop publication of an event. It accepts one
         argument, the published event. The event must be published, and
-        published by the sender of the recind event. If the published event
+        published by the sender of the rescind event. If the published event
         has any subscribers, a warning will be carp'd but execution will
         continue.
 
@@ -62,10 +75,11 @@ EVENTS
         subscriptions will be cancelled and a warning will be carp'd.
 
     'listing'
-        To receive an array reference containing the events that are
-        currently published within the component, call this event. It
-        accepts one argument, the return event to fire with the listing. The
-        sender must own the return event.
+        To receive an array reference containing tuples of the event name,
+        and the type of the events that are currently published within the
+        component, call this event. It accepts one argument, the return
+        event to fire with the listing. The sender must own the return
+        event.
 
 CLASS METHODS
     POE::Component::PubSub->new($alias)
@@ -120,7 +134,7 @@ SUPPORT
         <http://search.cpan.org/dist/POE-Component-PubSub>
 
 COPYRIGHT & LICENSE
-    Copyright 2008 Nicholas R. Perez, all rights reserved.
+    Copyright 2008-2009 Nicholas R. Perez, all rights reserved.
 
     This program is released under the following license: gpl
 

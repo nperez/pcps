@@ -2,13 +2,12 @@ use feature ':5.10';
 use warnings;
 use strict;
 
-use Test::More tests => 10;
+use Test::More tests => 9;
 use POE;
 
 BEGIN
 {
     use_ok('POE::Component::PubSub');
-    use_ok('POE::Component::PubSub::Types');
 }
 
 my $comp = POE::Component::PubSub->new('pub_alias');

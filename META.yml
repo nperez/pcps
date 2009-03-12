@@ -1,6 +1,6 @@
 ---
 name: POE-Component-PubSub
-version: 0.02
+version: 0.03
 author:
   - 'Nicholas R. Perez <nperez@cpan.org>'
 abstract: |-
@@ -17,7 +17,7 @@ build_requires:
 provides:
   POE::Component::PubSub:
     file: lib/POE/Component/PubSub.pm
-    version: 0.02
+    version: 0.03
 generated_by: Module::Build version 0.280801
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.2.html
