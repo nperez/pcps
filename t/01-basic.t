@@ -2,7 +2,7 @@ use feature ':5.10';
 use warnings;
 use strict;
 
-use Test::More tests => 9;
+use Test::More tests => 10;
 use POE;
 
 BEGIN
@@ -10,8 +10,7 @@ BEGIN
     use_ok('POE::Component::PubSub');
 }
 
-my $comp = POE::Component::PubSub->new('pub_alias');
-isa_ok($comp, 'POE::Component::PubSub');
+isa_ok(POE::Component::PubSub->new('pub_alias'), 'POE::Component::PubSub');
 
 POE::Session->create
 (
@@ -22,6 +21,7 @@ POE::Session->create
             $_[KERNEL]->alias_set('runner');
             $_[KERNEL]->yield('continue');
         },
+        
         'continue' => sub
         {
             make_publisher();
@@ -71,11 +71,25 @@ sub make_publisher()
                     {
                         pass('input argument okay');
                         $_[KERNEL]->alias_remove('test1');
+                        $_[KERNEL]->call('pub_alias', 'destroy');
+                        $_[KERNEL]->yield('destroyed');
                         return;
                     }
                 }
                 fail('input argument not okay');
             },
+
+            'destroyed' => sub
+            {
+                if(!$_[KERNEL]->post('pub_alias', 'nonexistant_events'))
+                {
+                    pass('destroy works');
+                }
+                else
+                {
+                    fail('destroy does not work appropriate');
+                }
+            }
         }
     );
 }

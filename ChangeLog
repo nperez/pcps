@@ -1,3 +1,7 @@
+2009-03-19 nperez <nperez@cpan.org>
+	* Release: 0.04
+	* Include a 'destroy' event to kill the session
+
 2009-03-12 nperez <nperez@cpan.org>
 	* New release: 0.03
 	* Enable 'input' published events

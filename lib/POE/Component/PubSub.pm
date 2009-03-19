@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use base('Exporter');
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 use POE;
 use Carp;
@@ -49,6 +49,7 @@ sub new()
 				'subscribe',
 				'rescind',
                 'cancel',
+                'destroy',
 			]
 		],
 
@@ -69,7 +70,7 @@ sub _start()
 
 sub _stop()
 {
-    $_[KERNEL]->alias_remove($_[OBJECT]->[+ALIAS]);
+    $_[KERNEL]->alias_remove($_) for $_[KERNEL]->alias_list();
 }
 
 sub _default()
@@ -116,6 +117,14 @@ sub _default()
             @$arg);
     }
 
+}
+
+sub destroy()
+{
+    my ($kernel, $self) = @_[KERNEL, OBJECT];
+
+    $self->[+EVENTS] = undef;
+    $kernel->alias_remove($_) for $kernel->alias_list();
 }
 
 sub listing()
@@ -413,7 +422,7 @@ subscribe.
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
 
 =head1 SYNOPSIS
 
@@ -432,6 +441,10 @@ $_[KERNEL]->post('pub', 'FOO');
 
 # Publish an 'input' event
 $_[KERNEL]->post('pub', 'publish', 'BAR', +PUBLISH_INPUT, 'MyInputEvent');
+
+# Tear down the whole thing
+$_[KERNEL]->post('pub', 'destroy');
+
 
 =head1 EVENTS
 
@@ -493,7 +506,13 @@ their subscriptions will be cancelled and a warning will be carp'd.
 To receive an array reference containing tuples of the event name, and the type
 of the events that are currently published within the component, call this 
 event. It accepts one argument, the return event to fire with the listing. The 
-sender must own the return event. 
+sender must own the return event.
+
+=item 'destroy'
+
+This event will simply destroy any of its current state and remove any and all
+aliases this session may have picked up. This should free up the session for
+garbage collection.
 
 =back
 
