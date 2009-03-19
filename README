@@ -4,7 +4,7 @@ NAME
     subscribe.
 
 VERSION
-    Version 0.03
+    Version 0.04
 
 SYNOPSIS
     # Instantiate the publish/subscriber with the alias "pub"
@@ -21,6 +21,8 @@ SYNOPSIS
 
     # Publish an 'input' event $_[KERNEL]->post('pub', 'publish', 'BAR',
     +PUBLISH_INPUT, 'MyInputEvent');
+
+    # Tear down the whole thing $_[KERNEL]->post('pub', 'destroy');
 
 EVENTS
     All public events do some sanity checking to make sure of a couple of
@@ -80,6 +82,11 @@ EVENTS
         component, call this event. It accepts one argument, the return
         event to fire with the listing. The sender must own the return
         event.
+
+    'destroy'
+        This event will simply destroy any of its current state and remove
+        any and all aliases this session may have picked up. This should
+        free up the session for garbage collection.
 
 CLASS METHODS
     POE::Component::PubSub->new($alias)
