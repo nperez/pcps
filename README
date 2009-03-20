@@ -95,6 +95,12 @@ CLASS METHODS
         set its kernel alias. If no alias is provided, the default alias is
         'PUBLISH_SUBSCRIBE'.
 
+DEBUGGING
+    $POE::Component::PubSub::TRACE_AND_DEBUG
+        To enable debugging within the component at the POE::Session level
+        and also with various warnings, set this variable to logical true
+        BEFORE calling new().
+
 NOTES
     Right now this component is extremely simple, but thorough when it comes
     to checking the various requirements for publishing and subscribing.
