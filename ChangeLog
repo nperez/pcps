@@ -1,3 +1,9 @@
+2009-03-20 nperez <nperez@cpan.org>
+	* Release: 0.05
+	* Clean up behaviors with regards event checking
+	* Fix warnings and bugs
+	* Add 'our $TRACE_AND_DEBUG;' ability
+
 2009-03-19 nperez <nperez@cpan.org>
 	* Release: 0.04
 	* Include a 'destroy' event to kill the session

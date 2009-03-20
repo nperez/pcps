@@ -5,7 +5,7 @@ use warnings;
 use strict;
 use base('Exporter');
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use POE;
 use Carp;
@@ -23,6 +23,8 @@ use constant
 };
 
 our @EXPORT = qw/ PUBLISH_INPUT PUBLISH_OUTPUT /;
+
+our $TRACE_AND_DEBUG = 0;
 
 sub new()
 {
@@ -55,8 +57,8 @@ sub new()
 
 		'options' =>
 		{
-			'trace'	=>	1,
-			'debug'	=>	1,
+			'trace'	=>	$TRACE_AND_DEBUG,
+			'debug'	=>	$TRACE_AND_DEBUG,
 		}
 	);
     
@@ -77,46 +79,48 @@ sub _default()
 {
     my ($kernel, $self, $sender, $event, $arg) = 
         @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
-
-    if(!$self->_is_published($event))
+    
+    if($self->_event_exists($event))
     {
-        Carp::carp('$event is not published');
-        return;
-    }
-
-    if($self->_is_output($event))
-    {
-        if(!$self->_owns($sender->ID(), $event))
+        if($self->_is_output($event))
         {
-            Carp::carp('$event is not owned by $sender');
-            return;
-        }
-
-        if(!$self->_has_subscribers($event))
-        {
-            Carp::carp('$event currently has no subscribers');
-            return;
-        }
-
-        while (my ($subscriber, $return) = each %{ $self->_get_subs($event) })
-        {
-            if(!$self->_has_event($subscriber, $return))
+            if(!$self->_owns($sender->ID(), $event))
             {
-                Carp::carp("$subscriber no longer has $return in their events");
-                $self->_remove_sub($subscriber, $event);
+                Carp::carp("Event [ $event ] is not owned by Sender: " . $sender->ID()) if $TRACE_AND_DEBUG;
+                return;
             }
-            
-            $kernel->post($subscriber, $return, @$arg);
+
+            if(!$self->_has_subscribers($event))
+            {
+                Carp::carp('Event[ '.$event.' ] currently has no subscribers') if $TRACE_AND_DEBUG;
+                return;
+            }
+
+            while (my ($subscriber, $return) = each %{ $self->_get_subs($event) })
+            {
+                if(!$self->_has_event($subscriber, $return))
+                {
+                    Carp::carp("$subscriber no longer has $return in their events") if $TRACE_AND_DEBUG;
+                    $self->_remove_sub($subscriber, $event);
+                }
+                
+                $kernel->post($subscriber, $return, @$arg);
+            }
+            return;
+        }
+        else
+        {
+            $kernel->post(
+                $kernel->ID_id_to_session($self->_get_pub($event)), 
+                $self->_get_input($event), 
+                @$arg);
         }
     }
     else
     {
-        $kernel->post(
-            $self->_get_pub($event), 
-            $self->_get_input($event), 
-            @$arg);
+        Carp::carp('Event [ '. $event . ' ] does not currently exist') if $TRACE_AND_DEBUG;
+        return;
     }
-
 }
 
 sub destroy()
@@ -133,13 +137,13 @@ sub listing()
 
     if(!defined($return))
 	{
-		Carp::carp('$event argument is required for listing');
+		Carp::carp('$event argument is required for listing') if $TRACE_AND_DEBUG;
         return;
 	}
     
     if(!$self->_has_event($sender, $return))
 	{
-	    Carp::carp($sender . ' must own the ' . $return . ' event');
+	    Carp::carp($sender . ' must own the ' . $return . ' event') if $TRACE_AND_DEBUG;
         return;
 	}
 
@@ -155,21 +159,39 @@ sub publish()
 		
 	if(!defined($event))
 	{
-		Carp::carp('$event argument is required for publishing');
+		Carp::carp('$event argument is required for publishing') if $TRACE_AND_DEBUG;
         return;
 	}
     
-    if($self->_is_published($event))
+    if($self->_event_exists($event))
     {
-        Carp::carp('$event already exists');
-        return;
+        if($self->_is_published($event))
+        {
+            Carp::carp('Event [ '. $event  .' ] already has a publisher') if $TRACE_AND_DEBUG;
+            return;
+        }
+        
+        if(defined($type) && $type == +PUBLISH_INPUT)
+        {
+            if(!$self->_has_event($sender, $input))
+            {
+                Carp::carp($sender . ' must own the ' . defined($input) ? $input : '' . ' event') if $TRACE_AND_DEBUG;
+                return;
+            }
+
+            if($self->_is_output($event))
+            {
+                Carp::carp('Event [ '. $event  .' ] already has a subscriber and precludes publishing') if $TRACE_AND_DEBUG;
+                return;
+            }
+        }
     }
-    
+
     if(defined($type) && $type == +PUBLISH_INPUT)
     {
         if(!$self->_has_event($sender, $input))
         {
-            Carp::carp($sender . ' must own the ' . defined($input) ? $input : '' . ' event');
+            Carp::carp($sender . ' must own the ' . defined($input) ? $input : '' . ' event') if $TRACE_AND_DEBUG;
             return;
         }
     }
@@ -185,21 +207,24 @@ sub subscribe()
 
 	if(!defined($event))
 	{
-		Carp::carp('$event argument is required for subscribing');
+		Carp::carp('$event argument is required for subscribing') if $TRACE_AND_DEBUG;
         return;
 	}
-
-    if(!$self->_is_output($event))
+    
+    if($self->_event_exists($event))
     {
-        Carp::carp('$event is not an output event');
-        return;
-    }
+        if(!$self->_is_output($event))
+        {
+            Carp::carp('Event[ '.$event.' ] is not an output event') if $TRACE_AND_DEBUG;
+            return;
+        }
 
-	if(!$self->_has_event($sender, $return))
-	{
-	    Carp::carp($sender . ' must own the ' . $return . ' event');
-        return;
-	}
+        if(!$self->_has_event($sender, $return))
+        {
+            Carp::carp($sender . ' must own the ' . $return . ' event') if $TRACE_AND_DEBUG;
+            return;
+        }
+    }
 
     $self->_add_sub($sender->ID, $event, $return);
 }
@@ -211,29 +236,31 @@ sub rescind()
 
     if(!defined($event))
 	{
-		Carp::carp('$event argument is required for rescinding');
+		Carp::carp('$event argument is required for rescinding') if $TRACE_AND_DEBUG;
         return;
 	}
-
-    if(!$self->_is_published($event))
-    {
-        Carp::carp('$event is not published');
-        return;
-    }
-
-    if(!$self->_owns($sender->ID(), $event))
-    {
-        Carp::carp('$event is not owned by $sender');
-        return;
-    }
-
-    if($self->_has_subscribers($event))
-    {
-        Carp::carp('$event currently has subscribers, but removing anyway');
-    }
     
-    $self->_remove_pub($sender->ID(), $event);
+    if($self->_event_exists($event))
+    {
+        if(!$self->_is_published($event))
+        {
+            Carp::carp('Event[ '.$event.' ] is not published') if $TRACE_AND_DEBUG;
+            return;
+        }
 
+        if(!$self->_owns($sender->ID(), $event))
+        {
+            Carp::carp('Event[ '.$event.' ] is not owned by $sender') if $TRACE_AND_DEBUG;
+            return;
+        }
+
+        if($self->_has_subscribers($event))
+        {
+            Carp::carp('Event[ '.$event.' ] currently has subscribers, but removing anyway') if $TRACE_AND_DEBUG;
+        }
+        
+        $self->_remove_pub($sender->ID(), $event);
+    }
 }
 
 sub cancel()
@@ -243,18 +270,20 @@ sub cancel()
     
     if(!defined($event))
 	{
-		Carp::carp('$event argument is required for canceling');
+		Carp::carp('$event argument is required for canceling') if $TRACE_AND_DEBUG;
         return;
 	}
-    
-    if(!$self->_is_subscribed($sender->ID(), $event))
+
+    if($self->_event_exists($event))
     {
-        Carp::carp($sender . ' must be subscribed to the ' . $event . ' event');
-        return;
+        if(!$self->_is_subscribed($sender->ID(), $event))
+        {
+            Carp::carp($sender . ' must be subscribed to the ' . $event . ' event') if $TRACE_AND_DEBUG;
+            return;
+        }
+
+        $self->_remove_sub($sender->ID(), $event);
     }
-
-    $self->_remove_sub($sender->ID(), $event);
-
 }
 
 # EVIL: We need to do some checking to make sure subscribers actually have the 
@@ -263,8 +292,6 @@ sub cancel()
 # I needed to implement this.
 sub _events()
 {
-    $DB::single = 1;
-
 	my ($self, $session) = @_;
 	
 	if(uc(ref($session)) =~ m/POE::SESSION/)
@@ -293,8 +320,6 @@ sub _has_event()
     return 0 if not defined($event);
     my $events = $self->_events( $session );
 
-    $DB::single = 1;
-    
     if(defined($events))
     {
 	    return scalar( grep( m/$event/, @{ $events } ) );
@@ -305,60 +330,54 @@ sub _has_event()
     }
 }
 
+sub _event_exists()
+{
+    return exists($_[0]->[+EVENTS]->{$_[1]});
+}
+
 sub _is_output()
 {
     my ($self, $event) = @_;
-    
-    return 0 if not defined($event);
-    return 0 if not exists($self->[+EVENTS]->{$event});
-    
-    if(defined($self->[+EVENTS]->{$event}->[+TYPE]))
-    {
-        return $self->[+EVENTS]->{$event}->[+TYPE] == +PUBLISH_OUTPUT;
-    }
-
-    return 1;
+    return $self->[+EVENTS]->{$event}->[+TYPE] == +PUBLISH_OUTPUT;
 }
 
 sub _has_subscribers()
 {
     my ($self, $event) = @_;
-    return 0 if not defined($event);
-    return 0 if not exists($self->[+EVENTS]->{$event});
     return scalar( keys %{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] } ) ;
 }
 
 sub _is_published()
 {
     my ($self, $event) = @_;
-    return 0 if not defined($event);
-    return exists($self->[+EVENTS]->{$event});
+    return defined($self->[+EVENTS]->{$event}->[+PUBLISHER]);
 }
 
 sub _is_subscribed()
 {
     my ($self, $subscriber, $event) = @_;
-    return 0 if not defined($event);
     return 0 if not defined($subscriber);
-    return 0 if not exists($self->[+EVENTS]->{$event});
     return exists($self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber});
 }
 
 sub _owns()
 {
     my ($self, $publisher, $event) = @_;
-    return 0 if not defined($event);
     return 0 if not defined($publisher);
-    return 0 if not exists($self->[+EVENTS]->{$event});
+    return 0 if not defined($self->[+EVENTS]->{$event}->[+PUBLISHER]);
     return $self->[+EVENTS]->{$event}->[+PUBLISHER] eq $publisher;
 }
 
 sub _add_pub()
 {
     my ($self, $publisher, $event, $type, $input) = @_;
-    $self->[+EVENTS]->{$event} = [];
+    if(!exists($self->[+EVENTS]->{$event}))
+    {
+        $self->[+EVENTS]->{$event} = [];
+        $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] = {};
+    }
     $self->[+EVENTS]->{$event}->[+PUBLISHER] = $publisher;
-    $self->[+EVENTS]->{$event}->[+TYPE] = $type;
+    $self->[+EVENTS]->{$event}->[+TYPE] = $type // +PUBLISH_OUTPUT;
     $self->[+EVENTS]->{$event}->[+INPUT] = $input;
     return;
 }
@@ -366,7 +385,13 @@ sub _add_pub()
 sub _add_sub()
 {
     my ($self, $subscriber, $event, $return) = @_;
+    if(!exists($self->[+EVENTS]->{$event}))
+    {
+        $self->[+EVENTS]->{$event} = [];
+        $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] = {};
+    }
     $self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber} = $return;
+    $self->[+EVENTS]->{$event}->[+TYPE] = +PUBLISH_OUTPUT;
     return;
 }
 
@@ -525,6 +550,17 @@ garbage collection.
 This is the constructor for the publish subscribe component. It instantiates
 it's own session using the provided $alias argument to set its kernel alias. 
 If no alias is provided, the default alias is 'PUBLISH_SUBSCRIBE'.
+
+=back
+
+=head1 DEBUGGING
+
+=over 4
+
+=item $POE::Component::PubSub::TRACE_AND_DEBUG
+
+To enable debugging within the component at the POE::Session level and also
+with various warnings, set this variable to logical true BEFORE calling new().
 
 =back
 
