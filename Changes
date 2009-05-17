@@ -1,0 +1,27 @@
+Revision history for {{ $dist->name }}: {{ $version }}
+
+{{ $NEXT }}
+        Rewrite using MooseX::Declare and POEx::Role::SessionInstantiation
+        Allow for 3rd party publication and subscription
+        Types and arguments are constrained much, much more
+        Switch to Dist::Zilla for distribution building, if there are problems, bear with me
+
+0.05    2009-03-20 
+        Clean up behaviors with regards event checking
+        Fix warnings and bugs
+        Add 'our $TRACE_AND_DEBUG;' ability
+
+0.04    2009-03-19 
+        Include a 'destroy' event to kill the session
+
+0.03    2009-03-12 
+        Enable 'input' published events
+        Relax subscribing without publisher
+
+0.02    2008-12-27 
+        Make sure Build.PL requires 5.10.0
+        Make sure PubSub.pm does a backwards compat 'use 5.010;'
+
+0.01    2008-12-27 
+        Initial release
+

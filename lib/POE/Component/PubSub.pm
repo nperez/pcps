@@ -1,523 +1,136 @@
 package POE::Component::PubSub;
 
-use 5.010;
-use warnings;
-use strict;
-use base('Exporter');
-
-our $VERSION = '0.05';
-
-use POE;
-use Carp;
-
-use constant
-{
-	'EVENTS'		    => 0,
-    'ALIAS'             => 1,
-    'PUBLISHER'         => 0,
-    'SUBSCRIBERS'       => 1,
-    'TYPE'              => 2,
-    'INPUT'             => 3,
-    'PUBLISH_INPUT'     => 0,
-    'PUBLISH_OUTPUT'    => 1,
-};
-
-our @EXPORT = qw/ PUBLISH_INPUT PUBLISH_OUTPUT /;
-
-our $TRACE_AND_DEBUG = 0;
-
-sub new()
-{
-	my $class = shift(@_);
-    my $alias = shift(@_);
-	my $self = [];
-	$self->[+EVENTS] = {};
-    $alias //= 'PUBLISH_SUBSCRIBE';
-
-    $self->[+ALIAS] = $alias;
-
-	bless($self, $class);
-
-	POE::Session->create
-	(
-		'object_states' =>
-		[
-			$self =>
-			[
-				'_start',
-				'_stop',
-				'_default',
-				'publish',
-				'subscribe',
-				'rescind',
-                'cancel',
-                'destroy',
-			]
-		],
-
-		'options' =>
-		{
-			'trace'	=>	$TRACE_AND_DEBUG,
-			'debug'	=>	$TRACE_AND_DEBUG,
-		}
-	);
-    
-    return $self;
-}
-
-sub _start()
-{
-    $_[KERNEL]->alias_set($_[OBJECT]->[+ALIAS]);
-}
-
-sub _stop()
-{
-    $_[KERNEL]->alias_remove($_) for $_[KERNEL]->alias_list();
-}
-
-sub _default()
-{
-    my ($kernel, $self, $sender, $event, $arg) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
-    
-    if($self->_event_exists($event))
-    {
-        if($self->_is_output($event))
-        {
-            if(!$self->_owns($sender->ID(), $event))
-            {
-                Carp::carp("Event [ $event ] is not owned by Sender: " . $sender->ID()) if $TRACE_AND_DEBUG;
-                return;
-            }
-
-            if(!$self->_has_subscribers($event))
-            {
-                Carp::carp('Event[ '.$event.' ] currently has no subscribers') if $TRACE_AND_DEBUG;
-                return;
-            }
-
-            while (my ($subscriber, $return) = each %{ $self->_get_subs($event) })
-            {
-                if(!$self->_has_event($subscriber, $return))
-                {
-                    Carp::carp("$subscriber no longer has $return in their events") if $TRACE_AND_DEBUG;
-                    $self->_remove_sub($subscriber, $event);
-                }
-                
-                $kernel->post($subscriber, $return, @$arg);
-            }
-            return;
-        }
-        else
-        {
-            $kernel->post(
-                $kernel->ID_id_to_session($self->_get_pub($event)), 
-                $self->_get_input($event), 
-                @$arg);
-        }
-    }
-    else
-    {
-        Carp::carp('Event [ '. $event . ' ] does not currently exist') if $TRACE_AND_DEBUG;
-        return;
-    }
-}
-
-sub destroy()
-{
-    my ($kernel, $self) = @_[KERNEL, OBJECT];
-
-    $self->[+EVENTS] = undef;
-    $kernel->alias_remove($_) for $kernel->alias_list();
-}
-
-sub listing()
-{
-    my ($kernel, $self, $sender, $return) = @_[KERNEL, OBJECT, SENDER, ARG1];
-
-    if(!defined($return))
-	{
-		Carp::carp('$event argument is required for listing') if $TRACE_AND_DEBUG;
-        return;
-	}
-    
-    if(!$self->_has_event($sender, $return))
-	{
-	    Carp::carp($sender . ' must own the ' . $return . ' event') if $TRACE_AND_DEBUG;
-        return;
-	}
-
-    my $events = $self->_all_published_events();
-
-    $kernel->post($sender, $return, $events);
-}
-
-sub publish()
-{
-	my ($kernel, $self, $sender, $event, $type, $input) =
-        @_[KERNEL, OBJECT, SENDER, ARG0, ARG1, ARG2];
-		
-	if(!defined($event))
-	{
-		Carp::carp('$event argument is required for publishing') if $TRACE_AND_DEBUG;
-        return;
-	}
-    
-    if($self->_event_exists($event))
-    {
-        if($self->_is_published($event))
-        {
-            Carp::carp('Event [ '. $event  .' ] already has a publisher') if $TRACE_AND_DEBUG;
-            return;
-        }
-        
-        if(defined($type) && $type == +PUBLISH_INPUT)
-        {
-            if(!$self->_has_event($sender, $input))
-            {
-                Carp::carp($sender . ' must own the ' . defined($input) ? $input : '' . ' event') if $TRACE_AND_DEBUG;
-                return;
-            }
-
-            if($self->_is_output($event))
-            {
-                Carp::carp('Event [ '. $event  .' ] already has a subscriber and precludes publishing') if $TRACE_AND_DEBUG;
-                return;
-            }
-        }
-    }
-
-    if(defined($type) && $type == +PUBLISH_INPUT)
-    {
-        if(!$self->_has_event($sender, $input))
-        {
-            Carp::carp($sender . ' must own the ' . defined($input) ? $input : '' . ' event') if $TRACE_AND_DEBUG;
-            return;
-        }
-    }
-
-	$self->_add_pub($sender->ID(), $event, $type, $input);
-	
-}
-
-sub subscribe()
-{
-	my ($kernel, $self, $sender, $event, $return) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0, ARG1];
-
-	if(!defined($event))
-	{
-		Carp::carp('$event argument is required for subscribing') if $TRACE_AND_DEBUG;
-        return;
-	}
-    
-    if($self->_event_exists($event))
-    {
-        if(!$self->_is_output($event))
-        {
-            Carp::carp('Event[ '.$event.' ] is not an output event') if $TRACE_AND_DEBUG;
-            return;
-        }
-
-        if(!$self->_has_event($sender, $return))
-        {
-            Carp::carp($sender . ' must own the ' . $return . ' event') if $TRACE_AND_DEBUG;
-            return;
-        }
-    }
-
-    $self->_add_sub($sender->ID, $event, $return);
-}
-
-sub rescind()
-{
-    my ($kernel, $self, $sender, $event) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0];
-
-    if(!defined($event))
-	{
-		Carp::carp('$event argument is required for rescinding') if $TRACE_AND_DEBUG;
-        return;
-	}
-    
-    if($self->_event_exists($event))
-    {
-        if(!$self->_is_published($event))
-        {
-            Carp::carp('Event[ '.$event.' ] is not published') if $TRACE_AND_DEBUG;
-            return;
-        }
-
-        if(!$self->_owns($sender->ID(), $event))
-        {
-            Carp::carp('Event[ '.$event.' ] is not owned by $sender') if $TRACE_AND_DEBUG;
-            return;
-        }
-
-        if($self->_has_subscribers($event))
-        {
-            Carp::carp('Event[ '.$event.' ] currently has subscribers, but removing anyway') if $TRACE_AND_DEBUG;
-        }
-        
-        $self->_remove_pub($sender->ID(), $event);
-    }
-}
-
-sub cancel()
-{
-    my ($kernel, $self, $sender, $event) = 
-        @_[KERNEL, OBJECT, SENDER, ARG0];
-    
-    if(!defined($event))
-	{
-		Carp::carp('$event argument is required for canceling') if $TRACE_AND_DEBUG;
-        return;
-	}
-
-    if($self->_event_exists($event))
-    {
-        if(!$self->_is_subscribed($sender->ID(), $event))
-        {
-            Carp::carp($sender . ' must be subscribed to the ' . $event . ' event') if $TRACE_AND_DEBUG;
-            return;
-        }
-
-        $self->_remove_sub($sender->ID(), $event);
-    }
-}
-
-# EVIL: We need to do some checking to make sure subscribers actually have the 
-# events they claim to have. I didn't want to have a dependency on 
-# POE::API::Peek and the subsequent Devel::Size, so I ripped out what concepts
-# I needed to implement this.
-sub _events()
-{
-	my ($self, $session) = @_;
-	
-	if(uc(ref($session)) =~ m/POE::SESSION/)
-	{
-		return [ keys( %{ $session->[ &POE::Session::SE_STATES() ] } ) ] ;
-	
-	} else {
-		
-		my $ref = $poe_kernel->ID_id_to_session($session);
-
-		if(defined($ref))
-		{
-			return [ keys( %{ $ref->[ &POE::Session::SE_STATES() ] } ) ];
-		
-		} else {
-
-			return undef;
-		}
-	}
-}
-
-sub _has_event()
-{
-	my ($self, $session, $event) = @_;
-
-    return 0 if not defined($event);
-    my $events = $self->_events( $session );
-
-    if(defined($events))
-    {
-	    return scalar( grep( m/$event/, @{ $events } ) );
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-sub _event_exists()
-{
-    return exists($_[0]->[+EVENTS]->{$_[1]});
-}
-
-sub _is_output()
-{
-    my ($self, $event) = @_;
-    return $self->[+EVENTS]->{$event}->[+TYPE] == +PUBLISH_OUTPUT;
-}
-
-sub _has_subscribers()
-{
-    my ($self, $event) = @_;
-    return scalar( keys %{ $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] } ) ;
-}
-
-sub _is_published()
-{
-    my ($self, $event) = @_;
-    return defined($self->[+EVENTS]->{$event}->[+PUBLISHER]);
-}
-
-sub _is_subscribed()
-{
-    my ($self, $subscriber, $event) = @_;
-    return 0 if not defined($subscriber);
-    return exists($self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber});
-}
-
-sub _owns()
-{
-    my ($self, $publisher, $event) = @_;
-    return 0 if not defined($publisher);
-    return 0 if not defined($self->[+EVENTS]->{$event}->[+PUBLISHER]);
-    return $self->[+EVENTS]->{$event}->[+PUBLISHER] eq $publisher;
-}
-
-sub _add_pub()
-{
-    my ($self, $publisher, $event, $type, $input) = @_;
-    if(!exists($self->[+EVENTS]->{$event}))
-    {
-        $self->[+EVENTS]->{$event} = [];
-        $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] = {};
-    }
-    $self->[+EVENTS]->{$event}->[+PUBLISHER] = $publisher;
-    $self->[+EVENTS]->{$event}->[+TYPE] = $type // +PUBLISH_OUTPUT;
-    $self->[+EVENTS]->{$event}->[+INPUT] = $input;
-    return;
-}
-
-sub _add_sub()
-{
-    my ($self, $subscriber, $event, $return) = @_;
-    if(!exists($self->[+EVENTS]->{$event}))
-    {
-        $self->[+EVENTS]->{$event} = [];
-        $self->[+EVENTS]->{$event}->[+SUBSCRIBERS] = {};
-    }
-    $self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber} = $return;
-    $self->[+EVENTS]->{$event}->[+TYPE] = +PUBLISH_OUTPUT;
-    return;
-}
-
-sub _del_sub()
-{
-    my ($self, $subscriber, $event) = @_;
-    delete($self->[+EVENTS]->{$event}->[+SUBSCRIBERS]->{$subscriber});
-    return;
-}
-
-sub _del_pub()
-{
-    my ($self, $publisher, $event) = @_;
-    delete($self->[+EVENTS]->{$event});
-    return;
-}
-
-sub _get_subs()
-{
-    my ($self, $event) = @_;
-    return $self->[+EVENTS]->{$event}->[+SUBSCRIBERS];
-}
-
-sub _get_pub()
-{
-    my ($self, $event) = @_;
-    return $self->[+EVENTS]->{$event}->[+PUBLISHER];
-}
-
-sub _get_input()
-{
-    my ($self, $event) = @_;
-    return $self->[+EVENTS]->{$event}->[+INPUT];
-}
-
-sub _all_published_events()
-{
-    my ($self) = @_;
-    return [ map { [$_, $self->[+EVENTS]->{$_}->[+INPUT]] } sort keys %{$self->[+EVENTS]} ];
-}
-
-1;
-
-__END__
-
-=pod
-
-=head1 NAME
-
-POE::Component::PubSub - A generic publish/subscribe POE::Component that 
-enables POE::Sessions to publish events to which other POE::Sessions may 
-subscribe.
-
-=head1 VERSION
-
-Version 0.04
+#ABSTRACT: A publish/subscribe component for the POE framework
 
 =head1 SYNOPSIS
+    
+    #imports PUBLISH_INPUT and PUBLISH_OUTPUT
+    use POE::Component::PubSub;
+    
+    # Instantiate the publish/subscriber with the alias "pub"
+    POE::Component::PubSub->new(alias => 'pub');
 
-# Instantiate the publish/subscriber with the alias "pub"
-POE::Component::PubSub->new('pub');
+    # Publish an event called "FOO". +PUBLISH_OUTPUT is actually optional.
+    $_[KERNEL]->post
+    (
+        'pub', 
+        'publish', 
+        event_name => 'FOO', 
+        publish_type => +PUBLISH_OUTPUT
+    );
 
-# Publish an event called "FOO". +PUBLISH_OUTPUT is actually optional.
-$_[KERNEL]->post('pub', 'publish', 'FOO', +PUBLISH_OUTPUT);
+    # Elsewhere, subscribe to that event, giving it an event to call
+    # when the published event is fired.
+    $_[KERNEL]->post
+    (
+        'pub', 
+        'subscribe', 
+        event_name => 'FOO', 
+        event_handler => 'FireThisEvent'
+    );
 
-# Elsewhere, subscribe to that event, giving it an event to call
-# when the published event is fired.
-$_[KERNEL]->post('pub', 'subscribe', 'FOO', 'FireThisEvent');
+    # Fire off the published event
+    $_[KERNEL]->post('pub', 'FOO');
 
-# Fire off the published event
-$_[KERNEL]->post('pub', 'FOO');
+    # Publish an 'input' event
+    $_[KERNEL]->post
+    (
+        'pub', 
+        'publish', 
+        event_name => 'BAR', 
+        publish_type => +PUBLISH_INPUT, 
+        input_handler =>'MyInputEvent'
+    );
 
-# Publish an 'input' event
-$_[KERNEL]->post('pub', 'publish', 'BAR', +PUBLISH_INPUT, 'MyInputEvent');
+    # Publish an event for another session
+    $_[KERNEL]->post
+    (
+        'pub',
+        'publish',
+        session => 'other_session',
+        event_name => 'SomeEvent',
+    );
 
-# Tear down the whole thing
-$_[KERNEL]->post('pub', 'destroy');
+    # Subscribe to an event for another session
+    $_[KEREL]->post
+    (
+        'pub',
+        'publish,
+        session => 'other_session',
+        event_name => 'SomeEvent',
+        event_handler => 'other_sessions_handler',
+    );
 
+    # Tear down the whole thing
+    $_[KERNEL]->post('pub', 'destroy');
+=cut
 
-=head1 EVENTS
+use 5.010;
+use MooseX::Declare;
 
-All public events do some sanity checking to make sure of a couple of things
-before allowing the events such as checking to make sure the posting session
-actually owns the event it is publishing, or that the event passed as the
-return event during subscription is owned by the sender. When one of those 
-cases comes up, an error is carp'd, and the event returns without stopping
-execution.
+class POE::Component::PubSub with POEx::Role::SessionInstantiation
+{
+    use Carp('carp', 'confess');
+    use POE::API::Peek;
+    use POE::Component::PubSub::Types(':all');
+    use MooseX::Types::Set::Object;
+    use POE::Component::PubSub::Event;
+    
+    sub import
+    {
+        no strict 'refs';
+        my $caller = caller();
+        *{ $caller . '::PUBLISH_INPUT' } = \&PUBLISH_INPUT;
+        *{ $caller . '::PUBLISH_OUPUT' } = \&PUBLISH_OUPUT;
+    }
+    
+=attr _api_peek
+    $pubsub->_api_peek
 
-=over 4
+This is a private attribute for accessing POE::API::Peek.
+=cut 
+    
+    has _api_peek =>
+    (
+        is          => 'ro',
+        isa         => 'POE::API::Peek',
+        default     => sub { POE::API::Peek->new() },
+        lazy        => 1,
+    );
 
-=item 'publish'
+=attr _events 
+    $pubsub->_events
 
-This is the event to use to publish events. It accepts one argument, the event
-to publish. The published event may not already be previously published. The
-event may be completely arbitrary and does not require the publisher to
-implement that event. Think of it as a name for a mailing list.
+This is a private attribute for accessing the PubSub::Events stored in this 
+instance of PubSub. Contains a Set::Object as provided by 
+MooseX::Types::Set::Object.
+=cut
 
-You can also publish an 'input' or inverse event. This allows for arbitrary
-sessions to post to your event. In this case, you must supply the optional
-published event type and the event to be called when the published event fires. 
+    has _events => 
+    (
+        is          => 'rw', 
+        isa         => 'Set::Object',
+        clearer     => '_clear__events',
+        predicate   => '_has__events',
+        default     => sub { [] },
+        lazy        => 1,
+        coerce      => 1,
+        handles     =>
+        {
+            all_events      => 'members',
+            add_event       => 'insert',
+            remove_event    => 'delete',
+        }
+    );
 
-There are two types: PUBLISH_INPUT and PUBLISH_OUTPUT. PUBLISH_OUPUT is implied
-when no argument is supplied.
+    method find_event(Str $name) returns (Maybe[POE::Component::PubSub::Event])
+    {
+        my $event;
+        map { $_->name eq $name ? $event = $_ : undef } $self->all_events;
+        return $event;        
+    }
 
-=item 'subscribe'
-
-This is the event to use when subscribing to published events. It accepts two
-arguments: 1) the published event, and 2) the event name of the subscriber to
-be called when the published event is fired. The event doesn't need to be  
-published prior to subscription to resolve chicken and egg problems in an async
-environment. But, the sender must own and implement the return event.
-
-=item 'rescind'
-
-Use this event to stop publication of an event. It accepts one argument, the 
-published event. The event must be published, and published by the sender of
-the rescind event. If the published event has any subscribers, a warning will
-be carp'd but execution will continue.
-
-=item 'cancel'
-
-Cancel subscriptions to events with this event. It accepts one argment, the
-published event. The event must be published and the sender must be subscribed
-to the event.
-
-=item '_default'
+=method _default(@args)
 
 After an event is published, the publisher may arbitrarily fire that event to
 this component and the subscribers will be notified by calling their respective
@@ -526,100 +139,324 @@ must be published, owned by the publisher, and have subscribers for the event
 to be propagated. If any of the subscribers no longer has a valid return event
 their subscriptions will be cancelled and a warning will be carp'd.
 
-=item 'listing'
+=cut
 
-To receive an array reference containing tuples of the event name, and the type
-of the events that are currently published within the component, call this 
-event. It accepts one argument, the return event to fire with the listing. The 
-sender must own the return event.
+    method _default(@args)
+    {
+        my $poe = $self->poe;
+        my $state = $poe->state;
+        my $warn = $self->options->{'debug'};
 
-=item 'destroy'
+        if(my $event = $self->find_event($state))
+        {
+            if($event->publishtype == +PUBLISH_OUTPUT)
+            {
+                my $sender = $poe->sender->ID;
+                if(!$event->has_publisher || !$event->publisher == $sender)
+                {
+                    carp("Event [ $event ] is not owned by Sender: " . $sender) if $warn;
+                    return;
+                }
 
-This event will simply destroy any of its current state and remove any and all
+                if(!$event->has_subscribers)
+                {
+                    carp("Event[ $event ] currently has no subscribers") if $warn;
+                    return;
+                }
+
+                foreach my $subscriber ($event->all_subscribers)
+                {
+                    my ($s_session, $s_event) = @{ $subscriber }{'session', 'event'};
+                    if(!$self->_has_event(session => $s_session, event_name => $s_event))
+                    {
+                        carp("$s_session no longer has $s_event in their events") if $warn;
+                        $self->remove_subscriber($subscriber);
+                    }
+                    
+                    $self->post($s_session, $s_event, @args);
+                }
+                return;
+            }
+            else
+            {
+                $self->post(
+                    $poe->kernel->ID_id_to_session($event->publisher), 
+                    $event->input, 
+                    @args);
+            }
+        }
+        else
+        {
+            carp("Event [ $state ] does not currently exist") if $warn;
+            return;
+        }
+    }
+
+=method destroy
+
+This event will simply destroy any of its current events and remove any and all
 aliases this session may have picked up. This should free up the session for
 garbage collection.
 
-=back
+=cut
+
+    method destroy()
+    {
+        $self->_clear__events;
+        my $kernel = $self->poe->kernel;
+        $kernel->alias_remove($_) for $kernel->alias_list();
+    }
+
+=method listing(SessionAlias :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
+
+To receive a listing of all the of the events inside of PubSub, you can either
+call this event and have it returned immediately, or return_event must be 
+provided and implemented in either the provided session or SENDER and the only
+argument to the return_event will be the events.
+
+=cut
+
+    method listing(SessionAlias :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
+    {
+        $session ||= $self->poe->sender->ID;
+        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        if($return_event && $session && !$self->_has_event(session => $session, event_name => $return_event))
+        {
+            carp("$session must own the $return_event event") if $self->options->{'debug'}; 
+            return;
+        }
+
+        my $events = $self->all_events;
+    
+        $self->poe->kernel->post($session, $return_event, $events) if $return_event;
+        return $events;
+    }
+
+=method publish(SessionAlias :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
+
+This is the event to use to publish events. The published event may not already
+be previously published. The event may be completely arbitrary and does not 
+require the publisher to implement that event. Think of it as a name for a 
+mailing list.
+
+You can also publish an 'input' or inverse event. This allows for arbitrary
+sessions to post to your event. In this case, you must supply the optional
+published event type and the event to be called when the published event fires. 
+
+There are two types: PUBLISH_INPUT and PUBLISH_OUTPUT. PUBLISH_OUPUT is implied
+when no argument is supplied.
+
+Also, you can publish an event from an arbitrary session as long as you provide
+a session alias.
+
+=cut
+
+    method publish(SessionAlias :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
+    {
+        $session ||= $self->poe->sender->ID;
+        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        my $warn = $self->options->{'debug'};
+
+        if(my $event = $self->find_event($event_name))
+        {
+            if($event->has_publisher)
+            {
+                carp("Event [ $event_name ] already has a publisher") if $warn;
+                return;
+            }
+            
+            if(defined($publish_type) && $publish_type == +PUBLISH_INPUT)
+            {
+                if(!defined($input_handler))
+                {
+                    carp('$input_handler argument is required for publishing an input event') if $warn;
+                    return;
+                }
+
+                if(!$self->_has_event(session => $session, event_name => $input_handler))
+                {
+                    carp("$session must own the $input_handler event") if $warn;
+                    return;
+                }
+
+                if($event->has_subscribers)
+                {
+                    carp("Event [ $event_name ] already has subscribers and precludes publishing") if $warn;
+                    return;
+                }
+            }
+
+            $event->publisher($session);
+        }
+        else
+        {
+            my %args;
+
+            if(defined($publish_type) && $publish_type == +PUBLISH_INPUT)
+            {
+                if(!defined($input_handler))
+                {
+                    carp('$input_handler argument is required for publishing an input event') if $warn;
+                    return;
+                }
+
+                if(!$self->_has_event(session => $session, event_name => $input_handler))
+                {
+                    carp("$session must own the $input_handler event") if $warn;
+                    return;
+                }
+                
+                @args{'publishtype', 'input'} = ($publish_type, $input_handler);
+            }
+
+            my $event = POE::Component::PubSub::Event->new
+            (
+                name => $event_name,
+                publisher => $session,
+                %args
+            );
+
+            $self->add_event($event);
+        }
+    }
+
+=method subscribe(SessionAlias :$session?, Str :$event_name, Str :$event_handler)
+
+This event is used to subscribe to a published event. The event does not need
+to exist at the time of subscription to avoid chicken and egg scenarios. The
+event_handler must be implemented in either the provided session or in the 
+SENDER. 
+
+=cut
+    method subscribe(SessionAlias :$session?, Str :$event_name, Str :$event_handler)
+    {
+        $session ||= $self->poe->sender->ID;
+        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        my $warn = $self->options->{'debug'};
+
+        if(my $event = $self->find_event($event_name))
+        {
+            if($event->publishtype == +PUBLISH_INPUT)
+            {
+                carp("Event[ $event_name ] is not an output event") if $warn;
+                return;
+            }
+
+            if(!$self->_has_event(session => $session, event_name => $event_handler))
+            {
+                carp("$session must own the $event_handler event") if $warn;
+                return;
+            }
+
+            $event->add_subscriber({session => $session, event => $event_handler});
+        }
+        else
+        {
+            my $event = POE::Component::PubSub::Event->new(name => $event_name);
+            $event->add_subscriber({session => $session, event => $event_handler});
+            $self->add_event($event);
+        }
+    }
+
+=method rescind(SessionAlias :$session?, Str :$event_name)
+
+Use this event to stop publication of an event. The event must be published by
+either the provided session or SENDER
+
+=cut
+
+    method rescind(SessionAlias :$session?, Str :$event_name)
+    {
+        $session ||= $self->poe->sender->ID;
+        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        my $warn = $self->options->{'debug'};
+
+        if(my $event = $self->find_event($event_name))
+        {
+            if($event->publisher != $session)
+            {
+                carp("Event[ $event_name ] is not owned by $session") if $warn;
+            }
+
+            if($event->has_subscribers)
+            {
+                carp("Event[ $event_name ] currently has subscribers, but removing anyway") if $warn;
+            }
+            
+            $self->remove_event($event);
+        }
+        else
+        {
+            carp("Event[ $event_name ] does not exist") if $warn;
+        }
+    }
+
+=method cancel(SessionAlias :$session?, Str :$event_name)
+
+Cancel subscriptions to events with this event. The event must contain the
+provided session or SENDER as a subscriber
+
+=cut
+
+    method cancel(SessionAlias :$session?, Str :$event_name)
+    {
+        $session ||= $self->poe->sender->ID;
+        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        my $warn = $self->options->{'debug'};
+        
+        if(my $event = $self->find_event($event_name))
+        {
+            if(my $subscriber = $event->find_subscriber($session))
+            {
+                $event->remove_subscriber($subscriber);
+            }
+            else
+            {
+                carp("$session must be subscribed to the $event_name event") if $warn;
+            }
+        }
+        else
+        {
+            carp("Event[ $event_name ] does not exist") if $warn;
+        }
+    }
+
+    method _has_event(SessionAlias :$session, Str :$event_name)
+    {
+        return 0 if not defined($event_name);
+
+        my $session_ref = $self->poe->kernel->ID_id_to_session($session);
+
+        if($session_ref->isa('Moose::Object') && $session_ref->does('POEx::Role::SessionInstantiation'))
+        {
+            return defined($session_ref->meta->get_method($event_name));
+        }
+        else
+        {
+            return scalar ( grep { /$event_name/ } $self->_api_peek->session_event_list($session_ref));
+        }
+    }
+}
+
+1;
+__END__
+=head1 DESCRIPTION
+
+POE::Component::PubSub provides a publish/subscribe mechanism for the POE
+framework allowing sessions to publish events and to also subscribe to those 
+events. Firing a published event posts an event to each subscriber of that 
+event. Publication and subscription can also be managed from an external
+session, but defaults to using the SENDER where possible.
 
 =head1 CLASS METHODS
 
 =over 4
 
-=item POE::Component::PubSub->new($alias)
+=item new()
 
-This is the constructor for the publish subscribe component. It instantiates
-it's own session using the provided $alias argument to set its kernel alias. 
-If no alias is provided, the default alias is 'PUBLISH_SUBSCRIBE'.
+This is the constructor for the publish subscribe component. It accepts the
+same arguments as any class composed with POEx::Role::SessionInstantiation. 
 
-=back
-
-=head1 DEBUGGING
-
-=over 4
-
-=item $POE::Component::PubSub::TRACE_AND_DEBUG
-
-To enable debugging within the component at the POE::Session level and also
-with various warnings, set this variable to logical true BEFORE calling new().
+See POEx::Role::SessionInstantiation for details.
 
 =back
-
-=head1 NOTES
-
-Right now this component is extremely simple, but thorough when it comes to 
-checking the various requirements for publishing and subscribing. Currently, 
-there is no mechanism to place meta-subscriptions to the events of the 
-component itself. This feature is planned for the next release.
-
-Also, to do some of the checking on whether subscribers own the return events,
-some ideas were lifted from POE::API::Peek, and like that module, if there are
-changes to the POE core, they may break this module. 
-
-=head1 AUTHOR
-
-Nicholas R. Perez, C<< <nperez at cpan.org> >>
-
-=head1 BUGS
-
-Please report any bugs or feature requests to
-C<bug-poe-component-pubsub at rt.cpan.org>, or through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=POE-Component-PubSub>.
-I will be notified, and then you'll automatically be notified of progress on
-your bug as I make changes.
-
-=head1 SUPPORT
-
-You can find documentation for this module with the perldoc command.
-
-    perldoc POE::Component::PubSub
-
-You can also look for information at:
-
-=over 4
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/POE-Component-PubSub>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/POE-Component-PubSub>
-
-=item * RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=POE-Component-PubSub>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/POE-Component-PubSub>
-
-=back
-
-=head1 COPYRIGHT & LICENSE
-
-Copyright 2008-2009 Nicholas R. Perez, all rights reserved.
-
-This program is released under the following license: gpl
-
-=cut
-
