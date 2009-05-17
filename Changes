@@ -1,6 +1,6 @@
-Revision history for {{ $dist->name }}: {{ $version }}
+Revision history for POE-Component-PubSub: 0.091370
 
-{{ $NEXT }}
+0.091370  2009-05-17 15:29:13 UTC
         Rewrite using MooseX::Declare and POEx::Role::SessionInstantiation
         Allow for 3rd party publication and subscription
         Types and arguments are constrained much, much more
