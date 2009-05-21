@@ -7,8 +7,9 @@ use MooseX::Declare;
 
 class POE::Component::PubSub::Event
 {
-    use MooseX::Types::Set::Object;
+    use MooseX::AttributeHelpers;
     use POE::Component::PubSub::Types(':all');
+    use MooseX::Types::Moose('HashRef');
     use signatures;
 
 =attr name
@@ -50,18 +51,19 @@ Remove the supplied subscriber from the event
 
     has subscribers =>
     (
+        metaclass   => 'MooseX::AttributeHelpers::Collection::Hash',
         is          => 'rw', 
-        isa         => 'Set::Object', 
-        default     => sub { [] },
+        isa         => HashRef[Subscriber], 
+        default     => sub { {} },
         lazy        => 1,
-        coerce      => 1,
         clearer     => 'clear_subscribers',
-        handles     =>
+        provides    =>
         {
-            all_subscribers     => 'members',
-            has_subscribers     => 'size',
-            add_subscriber      => 'insert',
-            remove_subscriber   => 'delete',
+            values  => 'all_subscribers',
+            count   => 'has_subscribers',
+            set     => 'add_subscriber',
+            delete  => 'remove_subscriber',
+            get     => 'get_subscriber',
         }
     );
 
@@ -116,20 +118,6 @@ handling event that belongs to the publisher
                 if not $self->has_publisher;
         },
     );
-
-=method find_subscriber(SessionID $session) returns (Maybe[Subscriber])
-
-This method will search for a particular subscriber by their SessionID. Returns
-undef if none was found.
-
-=cut
-
-    method find_subscriber(SessionID $session) returns (Maybe[Subscriber])
-    {
-        my $subscriber;
-        map { $_->{'session'} == $session ? $subscriber = $_ : undef } $self->subscribers->all;
-        return $subscriber;
-    }
 }
 
 1;

@@ -30,7 +30,29 @@ This indicates the Event is an input event
 use constant PUBLISH_OUTPUT => 2;
 use constant PUBLISH_INPUT  => -2;
 
-use Sub::Exporter -setup => { exports => [ qw/ PublishType Subscriber SessionID  PUBLISH_INPUT PUBLISH_OUTPUT SessionAlias SessionRef DoesSessionInstantiation to_SessionID /] };
+use Sub::Exporter -setup => 
+{ 
+    exports => 
+    [ 
+        qw/ 
+            PublishType 
+            Subscriber 
+            SessionID  
+            PUBLISH_INPUT 
+            PUBLISH_OUTPUT 
+            SessionAlias 
+            SessionRef 
+            DoesSessionInstantiation 
+            to_SessionID
+            to_SessionAlias
+            to_SessionRef
+            is_SessionID
+            is_SessionAlias
+            is_SessionRef
+            is_DoesSessionInstantiation
+        /
+    ] 
+};
 
 class_type 'POE::Session';
 
@@ -102,6 +124,8 @@ subtype DoesSessionInstantiation,
 
 =head1 COERCIONS
 
+=head2 SessionID
+
 You can coerce SessionAlias, SessionRef, and DoesSessionInstantiation to a 
 SessionID (via to_SessionID)
 
@@ -114,6 +138,21 @@ coerce SessionID,
         via { $_->ID },
     from DoesSessionInstantiation,
         via { $_->ID };
+
+coerce SessionAlias,
+    from SessionID,
+        via { ($poe_kernel->alias_list($_))[0]; },
+    from SessionRef,
+        via { ($poe_kernel->alias_list($_))[0]; },
+    from DoesSessionInstantiation,
+        via { $_->alias; };
+        
+
+coerce SessionRef,
+    from SessionID,
+        via { $poe_kernel->ID_id_to_session($_) },
+    from SessionAlias,
+        via { $poe_kernel->alias_resolve($_) };
 
 1;
 

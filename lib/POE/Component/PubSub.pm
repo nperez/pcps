@@ -73,8 +73,8 @@ class POE::Component::PubSub with POEx::Role::SessionInstantiation
     use Carp('carp', 'confess');
     use POE::API::Peek;
     use POE::Component::PubSub::Types(':all');
-    use MooseX::Types::Set::Object;
     use POE::Component::PubSub::Event;
+    use MooseX::AttributeHelpers;
     
     sub import
     {
@@ -102,33 +102,26 @@ This is a private attribute for accessing POE::API::Peek.
     $pubsub->_events
 
 This is a private attribute for accessing the PubSub::Events stored in this 
-instance of PubSub. Contains a Set::Object as provided by 
-MooseX::Types::Set::Object.
+instance of PubSub.  
 =cut
 
     has _events => 
     (
+        metaclass   => 'MooseX::AttributeHelpers::Collection::Hash',
         is          => 'rw', 
-        isa         => 'Set::Object',
+        isa         => 'HashRef[POE::Component::PubSub::Event]',
         clearer     => '_clear__events',
-        predicate   => '_has__events',
-        default     => sub { [] },
+        default     => sub { {} },
         lazy        => 1,
-        coerce      => 1,
-        handles     =>
+        provides    =>
         {
-            all_events      => 'members',
-            add_event       => 'insert',
-            remove_event    => 'delete',
+            values  => 'all_events',
+            set     => 'add_event',
+            delete  => 'remove_event',
+            get     => 'get_event',
+            count   => 'has_events',
         }
     );
-
-    method find_event(Str $name) returns (Maybe[POE::Component::PubSub::Event])
-    {
-        my $event;
-        map { $_->name eq $name ? $event = $_ : undef } $self->all_events;
-        return $event;        
-    }
 
 =method _default(@args)
 
@@ -147,7 +140,7 @@ their subscriptions will be cancelled and a warning will be carp'd.
         my $state = $poe->state;
         my $warn = $self->options->{'debug'};
 
-        if(my $event = $self->find_event($state))
+        if(my $event = $self->get_event($state))
         {
             if($event->publishtype == +PUBLISH_OUTPUT)
             {
@@ -170,7 +163,7 @@ their subscriptions will be cancelled and a warning will be carp'd.
                     if(!$self->_has_event(session => $s_session, event_name => $s_event))
                     {
                         carp("$s_session no longer has $s_event in their events") if $warn;
-                        $self->remove_subscriber($subscriber);
+                        $self->remove_subscriber($s_session);
                     }
                     
                     $self->post($s_session, $s_event, @args);
@@ -207,7 +200,7 @@ garbage collection.
         $kernel->alias_remove($_) for $kernel->alias_list();
     }
 
-=method listing(SessionAlias :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
+=method listing(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
 
 To receive a listing of all the of the events inside of PubSub, you can either
 call this event and have it returned immediately, or return_event must be 
@@ -216,23 +209,27 @@ argument to the return_event will be the events.
 
 =cut
 
-    method listing(SessionAlias :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
+    method listing(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
     {
-        $session ||= $self->poe->sender->ID;
-        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
-        if($return_event && $session && !$self->_has_event(session => $session, event_name => $return_event))
+        if($return_event && $session)
         {
-            carp("$session must own the $return_event event") if $self->options->{'debug'}; 
-            return;
+            $session ||= $self->poe->sender->ID;
+            $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
+            
+            if(!$self->_has_event(session => $session, event_name => $return_event))
+            {
+                carp("$session must own the $return_event event") if $self->options->{'debug'}; 
+                return;
+            }
         }
 
-        my $events = $self->all_events;
+        my $events = [$self->all_events];
     
         $self->poe->kernel->post($session, $return_event, $events) if $return_event;
         return $events;
     }
 
-=method publish(SessionAlias :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
+=method publish(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
 
 This is the event to use to publish events. The published event may not already
 be previously published. The event may be completely arbitrary and does not 
@@ -251,13 +248,13 @@ a session alias.
 
 =cut
 
-    method publish(SessionAlias :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
+    method publish(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
     {
         $session ||= $self->poe->sender->ID;
-        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
         my $warn = $self->options->{'debug'};
 
-        if(my $event = $self->find_event($event_name))
+        if(my $event = $self->get_event($event_name))
         {
             if($event->has_publisher)
             {
@@ -316,11 +313,11 @@ a session alias.
                 %args
             );
 
-            $self->add_event($event);
+            $self->add_event($event_name, $event);
         }
     }
 
-=method subscribe(SessionAlias :$session?, Str :$event_name, Str :$event_handler)
+=method subscribe(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name, Str :$event_handler)
 
 This event is used to subscribe to a published event. The event does not need
 to exist at the time of subscription to avoid chicken and egg scenarios. The
@@ -328,13 +325,13 @@ event_handler must be implemented in either the provided session or in the
 SENDER. 
 
 =cut
-    method subscribe(SessionAlias :$session?, Str :$event_name, Str :$event_handler)
+    method subscribe(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name, Str :$event_handler)
     {
         $session ||= $self->poe->sender->ID;
-        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
         my $warn = $self->options->{'debug'};
 
-        if(my $event = $self->find_event($event_name))
+        if(my $event = $self->get_event($event_name))
         {
             if($event->publishtype == +PUBLISH_INPUT)
             {
@@ -348,30 +345,30 @@ SENDER.
                 return;
             }
 
-            $event->add_subscriber({session => $session, event => $event_handler});
+            $event->add_subscriber($session => {session => $session, event => $event_handler});
         }
         else
         {
             my $event = POE::Component::PubSub::Event->new(name => $event_name);
-            $event->add_subscriber({session => $session, event => $event_handler});
-            $self->add_event($event);
+            $event->add_subscriber($session => {session => $session, event => $event_handler});
+            $self->add_event($event_name, $event);
         }
     }
 
-=method rescind(SessionAlias :$session?, Str :$event_name)
+=method rescind(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
 
 Use this event to stop publication of an event. The event must be published by
 either the provided session or SENDER
 
 =cut
 
-    method rescind(SessionAlias :$session?, Str :$event_name)
+    method rescind(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
     {
         $session ||= $self->poe->sender->ID;
-        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
         my $warn = $self->options->{'debug'};
 
-        if(my $event = $self->find_event($event_name))
+        if(my $event = $self->get_event($event_name))
         {
             if($event->publisher != $session)
             {
@@ -383,7 +380,7 @@ either the provided session or SENDER
                 carp("Event[ $event_name ] currently has subscribers, but removing anyway") if $warn;
             }
             
-            $self->remove_event($event);
+            $self->remove_event($event_name);
         }
         else
         {
@@ -391,24 +388,24 @@ either the provided session or SENDER
         }
     }
 
-=method cancel(SessionAlias :$session?, Str :$event_name)
+=method cancel(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
 
 Cancel subscriptions to events with this event. The event must contain the
 provided session or SENDER as a subscriber
 
 =cut
 
-    method cancel(SessionAlias :$session?, Str :$event_name)
+    method cancel(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
     {
         $session ||= $self->poe->sender->ID;
-        $session = to_SessionID($session) or confess('Unable to coerce SessionAlias to SessionID');
+        $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
         my $warn = $self->options->{'debug'};
         
-        if(my $event = $self->find_event($event_name))
+        if(my $event = $self->get_event($event_name))
         {
-            if(my $subscriber = $event->find_subscriber($session))
+            if(my $subscriber = $event->get_subscriber($session))
             {
-                $event->remove_subscriber($subscriber);
+                $event->remove_subscriber($session);
             }
             else
             {
@@ -421,7 +418,7 @@ provided session or SENDER as a subscriber
         }
     }
 
-    method _has_event(SessionAlias :$session, Str :$event_name)
+    method _has_event(SessionID :$session, Str :$event_name)
     {
         return 0 if not defined($event_name);
 
