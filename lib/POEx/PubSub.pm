@@ -1,14 +1,14 @@
-package POE::Component::PubSub;
+package POEx::PubSub;
 
-#ABSTRACT: A publish/subscribe component for the POE framework
+#ABSTRACT: A second generation publish/subscribe component for the POE framework
 
 =head1 SYNOPSIS
     
     #imports PUBLISH_INPUT and PUBLISH_OUTPUT
-    use POE::Component::PubSub;
+    use POEx::PubSub;
     
     # Instantiate the publish/subscriber with the alias "pub"
-    POE::Component::PubSub->new(alias => 'pub');
+    POEx::PubSub->new(alias => 'pub');
 
     # Publish an event called "FOO". +PUBLISH_OUTPUT is actually optional.
     $_[KERNEL]->post
@@ -65,15 +65,19 @@ package POE::Component::PubSub;
     $_[KERNEL]->post('pub', 'destroy');
 =cut
 
-use 5.010;
 use MooseX::Declare;
 
-class POE::Component::PubSub with POEx::Role::SessionInstantiation
+class POEx::PubSub
 {
+    use POEx::PubSub::Event;
+    with 'POEx::Role::SessionInstantiation';
+    use aliased 'POEx::Role::Event';
     use Carp('carp', 'confess');
     use POE::API::Peek;
-    use POE::Component::PubSub::Types(':all');
-    use POE::Component::PubSub::Event;
+    use POEx::PubSub::Types(':all');
+    use MooseX::Types;
+    use MooseX::Types::Moose(':all');
+    use POEx::Types(':all');
     use MooseX::AttributeHelpers;
     
     sub import
@@ -93,7 +97,7 @@ This is a private attribute for accessing POE::API::Peek.
     has _api_peek =>
     (
         is          => 'ro',
-        isa         => 'POE::API::Peek',
+        isa         => class_type('POE::API::Peek'),
         default     => sub { POE::API::Peek->new() },
         lazy        => 1,
     );
@@ -109,7 +113,7 @@ instance of PubSub.
     (
         metaclass   => 'MooseX::AttributeHelpers::Collection::Hash',
         is          => 'rw', 
-        isa         => 'HashRef[POE::Component::PubSub::Event]',
+        isa         => HashRef[class_type('POEx::PubSub::Event')],
         clearer     => '_clear__events',
         default     => sub { {} },
         lazy        => 1,
@@ -123,7 +127,7 @@ instance of PubSub.
         }
     );
 
-=method _default(@args)
+=method _default(ArrayRef $args) is Event
 
 After an event is published, the publisher may arbitrarily fire that event to
 this component and the subscribers will be notified by calling their respective
@@ -132,9 +136,11 @@ must be published, owned by the publisher, and have subscribers for the event
 to be propagated. If any of the subscribers no longer has a valid return event
 their subscriptions will be cancelled and a warning will be carp'd.
 
+This overrides POEx::Role::SessionInstantiation::_default().
+
 =cut
 
-    method _default(@args)
+    method _default(ArrayRef $args) is Event
     {
         my $poe = $self->poe;
         my $state = $poe->state;
@@ -166,7 +172,7 @@ their subscriptions will be cancelled and a warning will be carp'd.
                         $self->remove_subscriber($s_session);
                     }
                     
-                    $self->post($s_session, $s_event, @args);
+                    $self->post($s_session, $s_event, @$args);
                 }
                 return;
             }
@@ -175,7 +181,7 @@ their subscriptions will be cancelled and a warning will be carp'd.
                 $self->post(
                     $poe->kernel->ID_id_to_session($event->publisher), 
                     $event->input, 
-                    @args);
+                    @$args);
             }
         }
         else
@@ -185,7 +191,7 @@ their subscriptions will be cancelled and a warning will be carp'd.
         }
     }
 
-=method destroy
+=method destroy is Event
 
 This event will simply destroy any of its current events and remove any and all
 aliases this session may have picked up. This should free up the session for
@@ -193,14 +199,14 @@ garbage collection.
 
 =cut
 
-    method destroy()
+    method destroy is Event
     {
         $self->_clear__events;
         my $kernel = $self->poe->kernel;
         $kernel->alias_remove($_) for $kernel->alias_list();
     }
 
-=method listing(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
+=method listing(SessionRefIdAliasInstantiation :$session?, Str :$return_event?) is Event returns (ArrayRef)
 
 To receive a listing of all the of the events inside of PubSub, you can either
 call this event and have it returned immediately, or return_event must be 
@@ -209,7 +215,7 @@ argument to the return_event will be the events.
 
 =cut
 
-    method listing(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$return_event?) returns (ArrayRef[POE::Component::PubSub::Event])
+    method listing(SessionRefIdAliasInstantiation :$session?, Str :$return_event?) is Event returns (ArrayRef)
     {
         if($return_event && $session)
         {
@@ -229,7 +235,7 @@ argument to the return_event will be the events.
         return $events;
     }
 
-=method publish(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
+=method publish(SessionRefIdAliasInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?) is Event
 
 This is the event to use to publish events. The published event may not already
 be previously published. The event may be completely arbitrary and does not 
@@ -248,7 +254,7 @@ a session alias.
 
 =cut
 
-    method publish(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?)
+    method publish(SessionRefIdAliasInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?) is Event
     {
         $session ||= $self->poe->sender->ID;
         $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
@@ -306,7 +312,7 @@ a session alias.
                 @args{'publishtype', 'input'} = ($publish_type, $input_handler);
             }
 
-            my $event = POE::Component::PubSub::Event->new
+            my $event = 'POEx::PubSub::Event'->new
             (
                 name => $event_name,
                 publisher => $session,
@@ -317,7 +323,7 @@ a session alias.
         }
     }
 
-=method subscribe(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name, Str :$event_handler)
+=method subscribe(SessionRefIdAliasInstantiation :$session?, Str :$event_name, Str :$event_handler) is Event
 
 This event is used to subscribe to a published event. The event does not need
 to exist at the time of subscription to avoid chicken and egg scenarios. The
@@ -325,7 +331,7 @@ event_handler must be implemented in either the provided session or in the
 SENDER. 
 
 =cut
-    method subscribe(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name, Str :$event_handler)
+    method subscribe(SessionRefIdAliasInstantiation :$session?, Str :$event_name, Str :$event_handler) is Event
     {
         $session ||= $self->poe->sender->ID;
         $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
@@ -349,20 +355,20 @@ SENDER.
         }
         else
         {
-            my $event = POE::Component::PubSub::Event->new(name => $event_name);
+            my $event = 'POEx::PubSub::Event'->new(name => $event_name);
             $event->add_subscriber($session => {session => $session, event => $event_handler});
             $self->add_event($event_name, $event);
         }
     }
 
-=method rescind(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
+=method rescind(SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
 
 Use this event to stop publication of an event. The event must be published by
 either the provided session or SENDER
 
 =cut
 
-    method rescind(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
+    method rescind(SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
     {
         $session ||= $self->poe->sender->ID;
         $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
@@ -388,14 +394,14 @@ either the provided session or SENDER
         }
     }
 
-=method cancel(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
+=method cancel(SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
 
 Cancel subscriptions to events with this event. The event must contain the
 provided session or SENDER as a subscriber
 
 =cut
 
-    method cancel(SessionAlias|SessionID|SessionRef|DoesSessionInstantiation :$session?, Str :$event_name)
+    method cancel(SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
     {
         $session ||= $self->poe->sender->ID;
         $session = is_SessionID($session) ? $session : to_SessionID($session) or confess("Unable to coerce $session to SessionID");
@@ -418,6 +424,14 @@ provided session or SENDER as a subscriber
         }
     }
 
+=method _has_event(SessionID :$session, Str :$event_name)
+
+This is a private method used by PubSub to confirm the session has the stated 
+event. If it is class that composed SessionInstantiation, it checks via MOP,
+otherwise it uses POE::API::Peek to accomplis the deed.
+
+=cut
+
     method _has_event(SessionID :$session, Str :$event_name)
     {
         return 0 if not defined($event_name);
@@ -439,7 +453,7 @@ provided session or SENDER as a subscriber
 __END__
 =head1 DESCRIPTION
 
-POE::Component::PubSub provides a publish/subscribe mechanism for the POE
+POEx::PubSub provides a publish/subscribe mechanism for the POE
 framework allowing sessions to publish events and to also subscribe to those 
 events. Firing a published event posts an event to each subscriber of that 
 event. Publication and subscription can also be managed from an external

@@ -1,16 +1,15 @@
-package POE::Component::PubSub::Event;
+package POEx::PubSub::Event;
 
-#ABSTRACT: An event abstraction for POE::Component::PubSub
+#ABSTRACT: An event abstraction for POEx::PubSub
 
 use 5.010;
 use MooseX::Declare;
 
-class POE::Component::PubSub::Event
+class POEx::PubSub::Event
 {
     use MooseX::AttributeHelpers;
-    use POE::Component::PubSub::Types(':all');
-    use MooseX::Types::Moose('HashRef');
-    use signatures;
+    use POEx::PubSub::Types(':all');
+    use MooseX::Types::Moose(':all');
 
 =attr name
 
@@ -20,7 +19,7 @@ The name of the event.
     has name =>
     (
         is          => 'rw',
-        isa         => 'Str',
+        isa         => Str,
         required    => 1,
     );
 
@@ -51,7 +50,7 @@ Remove the supplied subscriber from the event
 
     has subscribers =>
     (
-        metaclass   => 'MooseX::AttributeHelpers::Collection::Hash',
+        metaclass   => 'Collection::Hash',
         is          => 'rw', 
         isa         => HashRef[Subscriber], 
         default     => sub { {} },
@@ -76,7 +75,7 @@ The event's publisher.
     has publisher =>
     (
         is          => 'rw',
-        isa         => 'Str',
+        isa         => Str,
         predicate   => 'has_publisher',
     );
 
@@ -91,8 +90,10 @@ The event's publish type.
         is          => 'rw',
         isa         => PublishType,
         default     => +PUBLISH_OUTPUT,
-        trigger     => sub ($self, $type) 
+        trigger     => 
+        sub
         { 
+            my ($self, $type) = @_;
             confess 'Cannot set publishtype to INPUT if there is no publisher' 
                 if $type == +PUBLISH_INPUT and not $self->has_publisher;
         }
@@ -108,10 +109,12 @@ handling event that belongs to the publisher
     has input =>
     (
         is          => 'rw',
-        isa         => 'Str',
+        isa         => Str,
         predicate   => 'has_input',
-        trigger     => sub ($self, $input)
+        trigger     => 
+        sub
         {
+            my ($self) = @_;
             confess 'Cannot set input on Event if publishtype is OUTPUT'
                 if $self->publishtype == +PUBLISH_OUTPUT;
             confess 'Cannot set inout if there is no publisher'
@@ -126,6 +129,6 @@ __END__
 
 =head1 DESCRIPTION
 
-POE::Component::PubSub::Event is a simple abstraction for published and 
+POEx::PubSub::Event is a simple abstraction for published and 
 subscribed events within PubSub. When using the find_event method or the
 listing method from PubSub, you will receive this object.
