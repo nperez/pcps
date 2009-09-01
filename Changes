@@ -1,4 +1,8 @@
 Revision history for {{ $dist->name }}: {{ $dist->version }}
 
 {{ $NEXT }}
+        Remove use 5.010 from Event.pm
+        Update dependency version numbers
+
+0.092430  2009-08-31 19:36:45 UTC
         Initial Release
