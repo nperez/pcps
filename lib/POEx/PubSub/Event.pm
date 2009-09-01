@@ -2,7 +2,6 @@ package POEx::PubSub::Event;
 
 #ABSTRACT: An event abstraction for POEx::PubSub
 
-use 5.010;
 use MooseX::Declare;
 
 class POEx::PubSub::Event
