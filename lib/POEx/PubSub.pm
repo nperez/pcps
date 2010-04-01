@@ -78,7 +78,6 @@ class POEx::PubSub
     use MooseX::Types;
     use MooseX::Types::Moose(':all');
     use POEx::Types(':all');
-    use MooseX::AttributeHelpers;
     
     sub import
     {
@@ -88,10 +87,12 @@ class POEx::PubSub
         *{ $caller . '::PUBLISH_OUPUT' } = \&PUBLISH_OUPUT;
     }
     
-=attr _api_peek
-    $pubsub->_api_peek
+=attribute_private _api_peek
+
+    is: ro, isa: class_type('POE::API::Peek')
 
 This is a private attribute for accessing POE::API::Peek.
+
 =cut 
     
     has _api_peek =>
@@ -102,32 +103,42 @@ This is a private attribute for accessing POE::API::Peek.
         lazy        => 1,
     );
 
-=attr _events 
-    $pubsub->_events
+=attribute_private _events 
 
 This is a private attribute for accessing the PubSub::Events stored in this 
-instance of PubSub.  
+instance of PubSub keyed by the event name. If events need to be accessed please use the provided methods:
+
+    {
+        all_events => 'values',
+        add_event => 'set',
+        remove_event => 'delete',
+        get_event => 'get',
+        has_events => 'count',
+    }
+
 =cut
 
     has _events => 
     (
-        metaclass   => 'MooseX::AttributeHelpers::Collection::Hash',
+        traits      => ['Hash'],
         is          => 'rw', 
         isa         => HashRef[class_type('POEx::PubSub::Event')],
         clearer     => '_clear__events',
         default     => sub { {} },
         lazy        => 1,
-        provides    =>
+        handles     =>
         {
-            values  => 'all_events',
-            set     => 'add_event',
-            delete  => 'remove_event',
-            get     => 'get_event',
-            count   => 'has_events',
+            all_events => 'values',
+            add_event => 'set',
+            remove_event => 'delete',
+            get_event => 'get',
+            has_events => 'count',
         }
     );
 
-=method _default(ArrayRef $args) is Event
+=method_private _default
+
+    (ArrayRef $args) is Event
 
 After an event is published, the publisher may arbitrarily fire that event to
 this component and the subscribers will be notified by calling their respective
@@ -191,7 +202,9 @@ This overrides POEx::Role::SessionInstantiation::_default().
         }
     }
 
-=method destroy is Event
+=method_public destroy
+
+    is Event
 
 This event will simply destroy any of its current events and remove any and all
 aliases this session may have picked up. This should free up the session for
@@ -206,7 +219,9 @@ garbage collection.
         $kernel->alias_remove($_) for $kernel->alias_list();
     }
 
-=method listing(SessionRefIdAliasInstantiation :$session?, Str :$return_event?) is Event returns (ArrayRef)
+=method_public listing
+
+    (SessionRefIdAliasInstantiation :$session?, Str :$return_event?) is Event returns (ArrayRef)
 
 To receive a listing of all the of the events inside of PubSub, you can either
 call this event and have it returned immediately, or return_event must be 
@@ -235,7 +250,9 @@ argument to the return_event will be the events.
         return $events;
     }
 
-=method publish(SessionRefIdAliasInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?) is Event
+=method_public publish
+
+    (SessionRefIdAliasInstantiation :$session?, Str :$event_name!, PublishType :$publish_type?, Str :$input_handler?) is Event
 
 This is the event to use to publish events. The published event may not already
 be previously published. The event may be completely arbitrary and does not 
@@ -323,7 +340,9 @@ a session alias.
         }
     }
 
-=method subscribe(SessionRefIdAliasInstantiation :$session?, Str :$event_name, Str :$event_handler) is Event
+=method_public subscribe
+
+    (SessionRefIdAliasInstantiation :$session?, Str :$event_name, Str :$event_handler) is Event
 
 This event is used to subscribe to a published event. The event does not need
 to exist at the time of subscription to avoid chicken and egg scenarios. The
@@ -361,7 +380,9 @@ SENDER.
         }
     }
 
-=method rescind(SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
+=method_public rescind
+
+    (SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
 
 Use this event to stop publication of an event. The event must be published by
 either the provided session or SENDER
@@ -394,7 +415,9 @@ either the provided session or SENDER
         }
     }
 
-=method cancel(SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
+=method_public cancel
+
+    (SessionRefIdAliasInstantiation :$session?, Str :$event_name) is Event
 
 Cancel subscriptions to events with this event. The event must contain the
 provided session or SENDER as a subscriber
@@ -424,7 +447,7 @@ provided session or SENDER as a subscriber
         }
     }
 
-=method _has_event(SessionID :$session, Str :$event_name)
+=method_private _has_event(SessionID :$session, Str :$event_name)
 
 This is a private method used by PubSub to confirm the session has the stated 
 event. If it is class that composed SessionInstantiation, it checks via MOP,
@@ -459,15 +482,3 @@ events. Firing a published event posts an event to each subscriber of that
 event. Publication and subscription can also be managed from an external
 session, but defaults to using the SENDER where possible.
 
-=head1 CLASS METHODS
-
-=over 4
-
-=item new()
-
-This is the constructor for the publish subscribe component. It accepts the
-same arguments as any class composed with POEx::Role::SessionInstantiation. 
-
-See POEx::Role::SessionInstantiation for details.
-
-=back

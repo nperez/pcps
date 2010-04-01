@@ -1,6 +1,8 @@
 Revision history for POEx-PubSub: {{ $dist->version }}
 
 {{ $NEXT }}
+
+1.1009100.092460  2009-09-03 21:16:14 UTC
         Update dep for POEx::Role::SessionInstantiation
 
 0.092440  2009-09-01 15:44:25 UTC

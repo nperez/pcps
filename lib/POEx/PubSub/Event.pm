@@ -6,15 +6,17 @@ use MooseX::Declare;
 
 class POEx::PubSub::Event
 {
-    use MooseX::AttributeHelpers;
     use POEx::PubSub::Types(':all');
     use MooseX::Types::Moose(':all');
 
-=attr name
+=attribute_public name
+
+    is: rw, isa: Str, required: 1
 
 The name of the event.
 
 =cut
+
     has name =>
     (
         is          => 'rw',
@@ -22,50 +24,43 @@ The name of the event.
         required    => 1,
     );
 
-=attr subscribers, predicate => 'has_subscribers', clearer => 'clear_subscribers
+=attribute_public subscribers
 
-The event's subscribers stored in a Set::Object
+    traits: Hash, is: rw, isa: HashRef[Subscriber]
 
-=cut
+subscribers holds all of the subscribers to this event. Subscribers can be accessed via the following methods:
 
-=method all_subscribers()
-    
-This method is delegated to the subscribers attribute to return all of the
-subscribers for this event
-
-=cut
-
-=method add_subscriber(Subscriber $sub)
-
-Add the supplied subscriber to the event
-
-=cut
-
-=method remove_subscriber(Subscriber $sub)
-
-Remove the supplied subscriber from the event
+    {
+        all_subscribers => 'values',
+        has_subscribers => 'count',
+        add_subscriber => 'set',
+        remove_subscriber => 'delete',
+        get_subscriber => 'get',
+    }
 
 =cut
 
     has subscribers =>
     (
-        metaclass   => 'Collection::Hash',
+        traits      => ['Hash'],
         is          => 'rw', 
         isa         => HashRef[Subscriber], 
         default     => sub { {} },
         lazy        => 1,
         clearer     => 'clear_subscribers',
-        provides    =>
+        handles     =>
         {
-            values  => 'all_subscribers',
-            count   => 'has_subscribers',
-            set     => 'add_subscriber',
-            delete  => 'remove_subscriber',
-            get     => 'get_subscriber',
+            all_subscribers => 'values',
+            has_subscribers => 'count',
+            add_subscriber => 'set',
+            remove_subscriber => 'delete',
+            get_subscriber => 'get',
         }
     );
 
-=attr publisher, predicate => 'has_publisher'
+=attribute_public publisher
+
+    is: rw, isa: Str
 
 The event's publisher.
 
@@ -78,9 +73,11 @@ The event's publisher.
         predicate   => 'has_publisher',
     );
 
-=attr publishtype, isa => PublishType
+=attribute_public publishtype
 
-The event's publish type. 
+    is: rw, isa => PublishType
+
+The event's publish type. Defaults to +PUBLISH_OUTPUT.
 
 =cut
 
@@ -98,7 +95,9 @@ The event's publish type.
         }
     );
 
-=attr input, predicate => 'has_input'
+=attribute_public input
+
+    is: rw, isa: Str
 
 If the publishtype is set to PUBLISH_INPUT, this will indicate the input
 handling event that belongs to the publisher

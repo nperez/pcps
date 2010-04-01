@@ -15,13 +15,11 @@ use MooseX::Types::Moose('Int', 'Str');
 use MooseX::Types::Structured('Dict');
 use POEx::Types(':all');
 
-=head1 CONSTANTS
-
-=head2 PUBLISH_OUTPUT
+=constant PUBLISH_OUTPUT
 
 This indicates the Event is an output event
 
-=head2 PUBLISH_INPUT
+=constant PUBLISH_INPUT
 
 This indicates the Event is an input event
 
@@ -43,9 +41,7 @@ use Sub::Exporter -setup =>
     ] 
 };
 
-=head1 TYPES
-
-=head2 PublishType
+=type PublishType
 
 The publish type constraint applied to Events. Can either be PUBLISH_INPUT or 
 PUBLISH_OUTPUT
@@ -57,7 +53,7 @@ subtype PublishType,
     where { $_ == -2 || $_ == 2 },
     message { 'PublishType is not PublishInput or PublishOutput' };
 
-=head2 Subscriber
+=type Subscriber
 
 When manipulating subscribers in an Event, expect to receive a well formed hash
 with the keys 'session' and 'event' corresponding to the subscribers SessionID
